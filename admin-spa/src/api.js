@@ -1,4 +1,4 @@
-// BookForge admin API client.
+// PenMyBook admin API client.
 //
 // Two backends behind the same origin (nginx in prod, vite proxy in dev):
 //   /py/*  -> book_admin (auth, config sections, admin accounts, audit, status)

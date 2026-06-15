@@ -145,7 +145,7 @@ export default function ConfigSection() {
     if (!Object.keys(changes).length) return
     try {
       await api.putConfigSection(section, changes)
-      setOk(`Applied ${Object.keys(changes).length} change(s) — BookForge confirmed.`)
+      setOk(`Applied ${Object.keys(changes).length} change(s) — PenMyBook confirmed.`)
       await load()
     } catch (err) {
       setError(err.message)

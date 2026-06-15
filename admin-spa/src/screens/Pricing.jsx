@@ -87,7 +87,7 @@ export default function Pricing() {
       {result && (
         <div className="msg ok">
           Applied {result.count} price change(s)
-          {result.org ? <> for org <code>{result.org}</code></> : ' (global)'} — BookForge confirmed.
+          {result.org ? <> for org <code>{result.org}</code></> : ' (global)'} — PenMyBook confirmed.
         </div>
       )}
 

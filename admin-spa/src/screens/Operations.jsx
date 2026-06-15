@@ -33,7 +33,7 @@ export default function Operations() {
       const updated = await api.patchSettings(changes)
       setSettings(updated)
       setCap(String(updated.max_concurrent_generations))
-      setOk('Applied — BookForge confirmed the change.')
+      setOk('Applied — PenMyBook confirmed the change.')
     } catch (err) {
       setError(err.message)
     }
@@ -45,8 +45,8 @@ export default function Operations() {
     <>
       <h1>Operations</h1>
       <p className="sub">
-        Live operator levers. Changes push to BookForge first; nothing is recorded
-        until BookForge confirms.
+        Live operator levers. Changes push to PenMyBook first; nothing is recorded
+        until PenMyBook confirms.
       </p>
       {error && <div className="msg error">{error}</div>}
       {ok && <div className="msg ok">{ok}</div>}

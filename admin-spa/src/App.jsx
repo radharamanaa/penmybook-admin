@@ -35,7 +35,7 @@ function Login({ onLoggedIn }) {
   return (
     <div className="login-wrap">
       <form className="panel login-card" onSubmit={submit}>
-        <h1>BookForge Admin</h1>
+        <h1>PenMyBook Admin</h1>
         <p className="sub">Operator sign-in</p>
         {error && <div className="msg error">{error}</div>}
         <label htmlFor="email">Email</label>
@@ -72,7 +72,7 @@ export default function App() {
   return (
     <div className="layout">
       <nav className="sidebar">
-        <div className="brand">BookForge<small>admin control plane</small></div>
+        <div className="brand">PenMyBook<small>admin control plane</small></div>
         <div className="group">Operate</div>
         <NavLink to="/" end>Operations</NavLink>
         <NavLink to="/analytics">Analytics</NavLink>

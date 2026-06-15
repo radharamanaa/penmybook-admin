@@ -1,4 +1,4 @@
-// Ported from the BookForge authors' site (frontend/src/palettes.js) so the
+// Ported from the PenMyBook authors' site (frontend/src/palettes.js) so the
 // admin console offers the same four palettes. The authors' site uses a richer
 // var set (--surface/--ink/--line/--success/--warning/--danger); the admin
 // console uses a leaner one (--panel/--text/--border/--good/--warn/--bad), so

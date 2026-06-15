@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="PenMyBook Admin">
+  <rect width="64" height="64" rx="14" fill="#1C1C1A"/>
+  <text x="32" y="41" text-anchor="middle" font-family="Fraunces, Georgia, 'Times New Roman', serif" font-weight="600" font-size="22" letter-spacing="-1.5">
+    <tspan fill="#FCFAF6">P</tspan><tspan fill="#FF5A36">M</tspan><tspan fill="#FCFAF6">B</tspan>
+  </text>
+</svg>
