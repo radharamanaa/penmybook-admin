@@ -1,0 +1,76 @@
+# BookForge ADMIN control plane — deployed SEPARATELY from the BookForge stack
+# (decision log D1/D2, docs/admin-control-plane/ARCHITECTURE.md). One small VM.
+#
+# Trust is ONE-WAY: these services reach BookForge's internal endpoints
+# (admin → BookForge ALLOWED); nothing in the BookForge compose may reference
+# an admin host (BookForge → admin DENIED — firewall in prod, and locally the
+# bookforge stack simply never joins admin_net).
+#
+# Reaching BookForge locally: the admin services resolve the BookForge stack
+# via BOOKFORGE_HOST (default host.docker.internal → the host-published ports
+# of the main docker-compose). In prod set BOOKFORGE_HOST to the BookForge
+# VM's address and open ONLY the internal endpoints in its firewall.
+#
+# Secrets (set real values in admin/.env):
+#   ADMIN_JWT_SECRET            — admin login tokens (≥32 bytes; NOT the mesh key)
+#   SERVICE_JWT_SIGNING_KEY     — the shared mesh key, for admin→BookForge pushes
+#   ADMIN_BOOTSTRAP_EMAIL/_PASSWORD_HASH — first admin (bcrypt hash, no plaintext)
+#   ADMIN_MONGODB_URL           — the ADMIN stack's own Mongo (admin_users/audit)
+
+name: bookforge-admin
+
+services:
+  admin-spa:
+    build: ./admin-spa
+    ports:
+      - "5174:80"
+    depends_on:
+      book_admin:
+        condition: service_healthy
+    networks: [admin_net]
+
+  book_admin:
+    build: ../book_admin
+    environment:
+      MONGODB_URL: ${ADMIN_MONGODB_URL:-mongodb://admin_mongo:27017}
+      MONGODB_DB_NAME: ${ADMIN_MONGODB_DB_NAME:-bookforge_admin}
+      ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET:-dev-insecure-admin-secret-change-me-32b!}
+      ADMIN_JWT_TTL_MIN: ${ADMIN_JWT_TTL_MIN:-60}
+      ADMIN_FRONTEND_ORIGIN: ${ADMIN_FRONTEND_ORIGIN:-http://localhost:5174}
+      ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-}
+      ADMIN_BOOTSTRAP_PASSWORD_HASH: ${ADMIN_BOOTSTRAP_PASSWORD_HASH:-}
+      SERVICE_JWT_SIGNING_KEY: ${SERVICE_JWT_SIGNING_KEY:-integration-suite-hs256-shared-key-32+bytes}
+      CURATOR_INTERNAL_URL: ${CURATOR_INTERNAL_URL:-http://host.docker.internal:8000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [admin_net]
+
+  admin-api:
+    build: ../admin-api
+    environment:
+      SERVER_PORT: 8104
+      ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET:-dev-insecure-admin-secret-change-me-32b!}
+      SERVICE_JWT_SIGNING_KEY: ${SERVICE_JWT_SIGNING_KEY:-integration-suite-hs256-shared-key-32+bytes}
+      ENTITLEMENTS_URL: ${ENTITLEMENTS_URL:-http://host.docker.internal:8101}
+      BILLING_URL: ${BILLING_URL:-http://host.docker.internal:8102}
+      ORG_URL: ${ORG_URL:-http://host.docker.internal:8103}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [admin_net]
+
+  # The admin stack's OWN datastore (admin_users, admin_audit_log) — fully
+  # separate from BookForge's Mongo per D1. NOTE: book_admin's settings/status
+  # READS still point at BookForge Mongo when MONGODB_URL is overridden to it;
+  # see ARCHITECTURE.md "Two-writer rule" for the transition note.
+  admin_mongo:
+    image: mongo:7
+    volumes:
+      - admin_mongo_data:/data/db
+    networks: [admin_net]
+
+networks:
+  admin_net:
+    name: bookforge_admin_net
+
+volumes:
+  admin_mongo_data:
