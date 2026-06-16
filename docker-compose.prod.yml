@@ -1,0 +1,31 @@
+# PROD override for the BookForge ADMIN stack (separate compose, separate network).
+# Applied as:
+#   docker compose -f admin/docker-compose.yml -f admin/docker-compose.prod.yml \
+#       up -d admin-spa book_admin admin-api
+#
+# - Points book_admin at the managed admin DocumentDB cluster over TLS (CA bundle
+#   mounted at /certs; the SSM-hydrated ADMIN_MONGODB_URL MUST carry
+#   ?tls=true&tlsCAFile=/certs/global-bundle.pem&retryWrites=false).
+# - Parks the local admin_mongo (replaced by the managed cluster) so the curated
+#   `up` never starts a local Mongo.
+# - Caps the admin-api JVM heap for the shared 16 GiB box (≈1.8 GiB total heap
+#   across entitlements/billing/org/admin-api).
+name: bookforge-admin
+
+services:
+  admin-api:
+    environment:
+      JAVA_TOOL_OPTIONS: ${ADMIN_API_JAVA_OPTS:--Xmx384m -Xss512k}
+
+  book_admin:
+    environment:
+      MONGODB_URL: ${ADMIN_MONGODB_URL}
+    volumes:
+      - ${RDS_CA_BUNDLE_HOST_PATH:-/opt/bookforge/certs}:/certs:ro
+
+  # admin_mongo is replaced by the managed admin DocumentDB cluster — parked as an
+  # idle no-op so the curated `up admin-spa book_admin admin-api` never starts it.
+  admin_mongo:
+    image: busybox
+    restart: "no"
+    command: ["sh", "-c", "sleep infinity"]
