@@ -104,13 +104,6 @@ function UserActions({ user, onDone, onError }) {
   const [otp, setOtp] = useState(null) // {action, challengeId, params}
   const [code, setCode] = useState('')
 
-  async function doTopUp() {
-    try {
-      await api.walletTopUp(user.userId, Number(topUp), 'admin top-up')
-      onDone(`Topped up ${topUp}¢ for ${user.email}`)
-    } catch (err) { onError(err.message) }
-  }
-
   async function startOtp(action, params) {
     try {
       const resp = await api.otpStart(action, user.userId, params)
@@ -126,6 +119,9 @@ function UserActions({ user, onDone, onError }) {
       if (otp.action === 'grant_credit') {
         await api.grantCredits(user.userId, otp.params.amountCents, v.stepUpToken)
         onDone(`Granted ${otp.params.amountCents}¢ to ${user.email}`)
+      } else if (otp.action === 'wallet_top_up') {
+        await api.walletTopUp(user.userId, otp.params.amountCents, 'admin top-up', v.stepUpToken)
+        onDone(`Topped up ${otp.params.amountCents}¢ for ${user.email}`)
       } else {
         await api.refund(user.userId, otp.params.paymentId, otp.params.refundAmountCents,
           'admin refund', v.stepUpToken)
@@ -148,10 +144,13 @@ function UserActions({ user, onDone, onError }) {
 
       <div className="row">
         <div>
-          <label>Wallet top-up (cents) — no OTP</label>
+          <label>Wallet top-up (cents) — OTP required</label>
           <input type="number" min="1" value={topUp} onChange={(e) => setTopUp(e.target.value)} />
         </div>
-        <button disabled={!topUp} onClick={doTopUp}>Top up</button>
+        <button disabled={!topUp}
+                onClick={() => startOtp('wallet_top_up', { amountCents: Number(topUp) })}>
+          Start OTP top-up
+        </button>
       </div>
 
       <div className="row">

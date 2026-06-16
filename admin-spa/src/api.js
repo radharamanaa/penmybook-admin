@@ -95,9 +95,19 @@ export const api = {
   // ── users & money (admin-api) ──
   searchUsers: (email, limit = 50) =>
     request(`/api/v1/admin/users/search?email=${encodeURIComponent(email)}&limit=${limit}`),
-  walletTopUp: (userId, amountCents, reason) =>
-    request(`/api/v1/admin/users/${userId}/wallet/top-up`, {
-      method: 'POST', body: { amountCents, reason },
+  walletTopUp: (userId, amountCents, reason, stepUpToken) =>
+    fetch(`/api/v1/admin/users/${userId}/wallet/top-up`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${_token}`,
+        'X-Step-Up-Token': stepUpToken,
+      },
+      body: JSON.stringify({ amountCents, reason }),
+    }).then(async (r) => {
+      const j = await r.json().catch(() => null)
+      if (!r.ok) throw new ApiError(r.status, j)
+      return j
     }),
   setPlatformAdmin: (userId, isPlatformAdmin) =>
     request(`/api/v1/admin/users/${userId}`, { method: 'PATCH', body: { isPlatformAdmin } }),
