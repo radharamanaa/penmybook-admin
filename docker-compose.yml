@@ -51,9 +51,12 @@ services:
       SERVER_PORT: 8104
       ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET:-dev-insecure-admin-secret-change-me-32b!}
       SERVICE_JWT_SIGNING_KEY: ${SERVICE_JWT_SIGNING_KEY:-integration-suite-hs256-shared-key-32+bytes}
-      ENTITLEMENTS_URL: ${ENTITLEMENTS_URL:-http://host.docker.internal:8101}
-      BILLING_URL: ${BILLING_URL:-http://host.docker.internal:8102}
-      ORG_URL: ${ORG_URL:-http://host.docker.internal:8103}
+      # host.docker.internal must use the HOST-published ports (18101/18102/18103),
+      # not the services' internal container ports (8101/8102/8103) — the main app
+      # publishes entitlements/billing/org on the 1810x host ports (docker-compose.yml).
+      ENTITLEMENTS_URL: ${ENTITLEMENTS_URL:-http://host.docker.internal:18101}
+      BILLING_URL: ${BILLING_URL:-http://host.docker.internal:18102}
+      ORG_URL: ${ORG_URL:-http://host.docker.internal:18103}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks: [admin_net]
