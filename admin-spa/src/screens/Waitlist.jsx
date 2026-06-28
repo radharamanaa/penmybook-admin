@@ -2,9 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api.js'
 
 /**
- * Closed-beta waitlist (D11): every signup is waitlisted; the operator approves testers
- * (primarily by email on the Users screen). This screen owns the weekly approval budget +
- * a browse-and-admit list of everyone currently waiting.
+ * Closed-beta waitlist (D11; fair auto-admit 2026-06-28): the week has a single approval
+ * budget. While slots remain AND nobody is already waiting, a new signup is auto-admitted
+ * (ACTIVE) and consumes one slot; the operator admitting a waiting tester consumes one too —
+ * both draw down the SAME weekly budget, so "slots remaining" falls on either event. Once the
+ * slots are used up (or a queue has formed), new signups wait here until the operator drains
+ * the queue or raises the limit. This screen owns that budget + a browse-and-admit list of
+ * everyone currently waiting.
  */
 export default function Waitlist() {
   const [config, setConfig] = useState(null)
@@ -65,9 +69,12 @@ export default function Waitlist() {
     <>
       <h1>Waitlist</h1>
       <p className="sub">
-        Closed beta — every new signup is waitlisted. Approve testers here or, for a specific
-        person, search their email under <strong>Users &amp; money</strong>. Each approval uses
-        one of this week's slots (resets Sunday); raise the limit to admit more.
+        Closed beta — while this week still has slots free and nobody is waiting, new signups
+        are let straight in automatically; once the slots are used up (or a queue has formed)
+        signups wait here. Both those auto-admissions and the approvals you make use the same
+        weekly slots, so <strong>slots remaining</strong> drops on either (resets Sunday). To
+        admit a specific waiting person, approve them here or search their email under{' '}
+        <strong>Users &amp; money</strong>; raise the limit to admit more.
       </p>
       {error && <div className="msg error">{error}</div>}
       {ok && <div className="msg ok">{ok}</div>}
@@ -76,7 +83,7 @@ export default function Waitlist() {
         <h2 style={{ marginTop: 0 }}>This week</h2>
         <div className="stats">
           <div><div className="stat">{config.admittedThisWeek}</div>
-            <div className="stat-label">admitted</div></div>
+            <div className="stat-label">admitted (incl. auto)</div></div>
           <div><div className="stat">{config.weeklyApprovalLimit}</div>
             <div className="stat-label">weekly limit</div></div>
           <div><div className="stat">{remaining}</div>
