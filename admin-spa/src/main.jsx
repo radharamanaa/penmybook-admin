@@ -10,6 +10,7 @@ import Pricing from './screens/Pricing.jsx'
 import Users from './screens/Users.jsx'
 import Waitlist from './screens/Waitlist.jsx'
 import Analytics from './screens/Analytics.jsx'
+import Spend from './screens/Spend.jsx'
 import AdminAccounts from './screens/AdminAccounts.jsx'
 import Audit from './screens/Audit.jsx'
 import SystemView from './screens/SystemView.jsx'
@@ -25,6 +26,7 @@ const router = createBrowserRouter([
       { path: '/users', element: <Users /> },
       { path: '/waitlist', element: <Waitlist /> },
       { path: '/analytics', element: <Analytics /> },
+      { path: '/spend', element: <Spend /> },
       { path: '/accounts', element: <AdminAccounts /> },
       { path: '/audit', element: <Audit /> },
       { path: '/system', element: <SystemView /> },

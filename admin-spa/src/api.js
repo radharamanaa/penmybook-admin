@@ -166,4 +166,14 @@ export const api = {
     request(`/py/admin/analytics/conversations?period=${period}`),
   analyticsBooks: (period = 'last_week') => request(`/py/admin/analytics/books?period=${period}`),
   analyticsLive: () => request('/py/admin/analytics/live'),
+
+  // ── spend dashboard: exact-cents money (admin-api → entitlements + billing) ──
+  spendGlobal: () => request('/api/v1/admin/spend/global'),
+  spendFlows: () => request('/api/v1/admin/spend/flows'),
+  userSpend: (userId) => request(`/api/v1/admin/users/${userId}/spend`),
+  orgSpend: (orgId) => request(`/api/v1/admin/orgs/${orgId}/spend`),
+  // ── spend dashboard: product usage (book_admin proxy → curator Mongo rollup) ──
+  usageLanes: () => request('/py/admin/analytics/usage/lanes'),
+  usageByUser: (userId) => request(`/py/admin/analytics/usage/by-user/${userId}`),
+  usageByOrg: (orgId) => request(`/py/admin/analytics/usage/by-org/${orgId}`),
 }

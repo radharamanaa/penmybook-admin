@@ -76,6 +76,7 @@ export default function App() {
         <div className="group">Operate</div>
         <NavLink to="/" end>Operations</NavLink>
         <NavLink to="/analytics">Analytics</NavLink>
+        <NavLink to="/spend">Spend</NavLink>
         <div className="group">Configure</div>
         {CONFIG_SECTIONS.map((s) => (
           <NavLink key={s.key} to={`/config/${s.key}`}>{s.label}</NavLink>
