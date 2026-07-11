@@ -23,7 +23,12 @@ services:
 
   book_admin:
     environment:
-      MONGODB_URL: ${ADMIN_MONGODB_URL}
+      # Admin data (admin_users/audit) lives in the `bookforge_admin` DATABASE on the
+      # shared APP DocumentDB cluster (MONGODB_URL), not a dedicated admin cluster —
+      # collapsed 2026-07-11 to drop the 2nd db.t3.medium (~$65/mo) at 2-user scale.
+      # DB-level separation (MONGODB_DB_NAME=bookforge_admin, default) keeps admin data
+      # namespaced; the one-way app<-admin trust is enforced at the API/JWT layer.
+      MONGODB_URL: ${MONGODB_URL}
       # book_admin calls curator; default is host.docker.internal:8000 (box). On the
       # admin island curator is on ECS → Cloud Map. (admin-api's ENTITLEMENTS/BILLING/
       # ORG_URL are already repointed above; this was the one host.docker.internal miss.)
