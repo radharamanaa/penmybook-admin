@@ -16,6 +16,10 @@ services:
   admin-api:
     environment:
       JAVA_TOOL_OPTIONS: ${ADMIN_API_JAVA_OPTS:--Xmx384m -Xss512k}
+      # Control-plane moved to ECS (Cloud Map) — was host.docker.internal:1810x (box).
+      ENTITLEMENTS_URL: http://entitlements.pmb.local:8101
+      BILLING_URL: http://billing.pmb.local:8102
+      ORG_URL: http://org.pmb.local:8103
 
   book_admin:
     environment:
