@@ -24,6 +24,10 @@ services:
   book_admin:
     environment:
       MONGODB_URL: ${ADMIN_MONGODB_URL}
+      # book_admin calls curator; default is host.docker.internal:8000 (box). On the
+      # admin island curator is on ECS → Cloud Map. (admin-api's ENTITLEMENTS/BILLING/
+      # ORG_URL are already repointed above; this was the one host.docker.internal miss.)
+      CURATOR_INTERNAL_URL: http://curator.pmb.local:8000
     volumes:
       - ${RDS_CA_BUNDLE_HOST_PATH:-/opt/bookforge/certs}:/certs:ro
 
