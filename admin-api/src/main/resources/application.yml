@@ -1,0 +1,95 @@
+# admin-api application config. Values resolve from env (loaded from .env via spring-dotenv in dev).
+# No database — admin-api is a facade over entitlements / billing / org.
+server:
+  port: ${SERVER_PORT:8104}
+
+spring:
+  application:
+    name: admin-api
+  threads:
+    virtual:
+      enabled: true
+
+admin:
+  step-up:
+    required: ${STEP_UP_REQUIRED:true}
+    token-audience: ${STEP_UP_TOKEN_AUDIENCE:admin-write}
+  required-role: ${REQUIRED_ROLE:bookforge_admin}
+  idle-timeout-minutes: ${IDLE_TIMEOUT_MINUTES:30}
+
+downstream:
+  entitlements-url: ${ENTITLEMENTS_URL:http://localhost:8101}
+  billing-url: ${BILLING_URL:http://localhost:8102}
+  org-url: ${ORG_URL:http://localhost:8103}
+
+service-jwt:
+  signing-key: ${SERVICE_JWT_SIGNING_KEY:dev-only-hs256-shared-secret-change-me}
+  issuer: ${SERVICE_JWT_ISSUER:bookforge-internal}
+  audience: ${SERVICE_JWT_AUDIENCE:admin-api}
+
+# Inbound admin-login JWT (minted by book_admin; decision log D4/D16). The secret is
+# DELIBERATELY distinct from service-jwt.signing-key — defaults match book_admin's dev values.
+# NOTE: the dev default is ≥32 bytes — Nimbus enforces the RFC 7518 256-bit HS256 minimum.
+admin-jwt:
+  secret: ${ADMIN_JWT_SECRET:dev-insecure-admin-secret-change-me-32b!}
+  issuer: ${ADMIN_JWT_ISSUER:book_admin}
+  audience: ${ADMIN_JWT_AUDIENCE:bookforge-admin}
+
+cognito:
+  region: ${COGNITO_REGION:us-east-1}
+  user-pool-id: ${COGNITO_USER_POOL_ID:us-east-1_LOCALSTUB}
+  admin-client-id: ${COGNITO_ADMIN_CLIENT_ID:local-admin-client-stub}
+  jwks-ttl-seconds: ${COGNITO_JWKS_TTL_SECONDS:3600}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+# Resilience4j circuit breakers wrap the Phase-3b admin-portal downstream calls so an
+# entitlements / billing outage short-circuits to a fast 503 rather than tying up admin-portal
+# request threads. The instance names MUST match the @CircuitBreaker annotation values in
+# HttpDownstreamClient.
+resilience4j:
+  circuitbreaker:
+    instances:
+      entitlements:
+        register-health-indicator: true
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+      billing:
+        register-health-indicator: true
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+      # Spend-dashboard READ breakers are deliberately SEPARATE instances: the dashboard's
+      # aggregate reads (full ledger scans behind the global tiles) must never be able to
+      # open the breakers gating the money-path admin ops (refund / grant / top-up) above.
+      entitlements-reports:
+        register-health-indicator: true
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+      billing-reports:
+        register-health-indicator: true
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true

@@ -30,7 +30,7 @@ services:
     networks: [admin_net]
 
   book_admin:
-    build: ../book_admin
+    build: ./book_admin
     environment:
       MONGODB_URL: ${ADMIN_MONGODB_URL:-mongodb://admin_mongo:27017}
       MONGODB_DB_NAME: ${ADMIN_MONGODB_DB_NAME:-bookforge_admin}
@@ -46,7 +46,7 @@ services:
     networks: [admin_net]
 
   admin-api:
-    build: ../admin-api
+    build: ./admin-api
     environment:
       SERVER_PORT: 8104
       ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET:-dev-insecure-admin-secret-change-me-32b!}
