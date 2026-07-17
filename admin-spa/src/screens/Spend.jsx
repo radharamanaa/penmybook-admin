@@ -108,6 +108,8 @@ function usageRows(usage) {
     ['generated chapters', fmtCount(usage.generated_chapters_total)],
     ['avg chapters/book', usage.avg_generated_chapters_per_book ?? 0],
     ['est. LLM cost (all phases)*', fmtUsd(Math.round((usage.estimated_llm_cost_usd ?? 0) * 100))],
+    ['Firecrawl scrapes', fmtCount(usage.firecrawl_calls)],
+    ['Firecrawl chars', fmtCount(usage.firecrawl_chars)],
   ]
 }
 
