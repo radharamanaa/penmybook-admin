@@ -50,6 +50,9 @@ import java.util.UUID;
 @Component
 public class HttpDownstreamClient implements DownstreamClient {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(HttpDownstreamClient.class);
+
     private static final String ENTITLEMENTS_AUD = "entitlements";
     private static final String BILLING_AUD = "billing";
     private static final String ORG_AUD = "org";
@@ -211,6 +214,14 @@ public class HttpDownstreamClient implements DownstreamClient {
             boolean idempotentReplay = json.path("idempotentReplay").asBoolean(false);
             return DownstreamResult.refund(success, auditEntryId, requestedCents,
                     walletDebitedCents, idempotentReplay);
+        } catch (DownstreamConflictException conflict) {
+            // 409: a refund for this payment is already awaiting Paddle's card-credit approval
+            // (billing's PENDING_CARD_REFUND guard). NOT an outage and NOT a failed action to retry
+            // now — log distinctly so ops don't chase it as a billing error. Reported as
+            // success=false (the action did not occur); the operator retries once the prior settles.
+            log.warn("Refund for payment {} rejected as a conflict (409): a prior refund is still "
+                    + "awaiting card credit — retry after it settles", command.params().get("paymentId"));
+            return new DownstreamResult(false, null, null);
         } catch (DownstreamCallException e) {
             return new DownstreamResult(false, null, null);
         }
@@ -574,6 +585,11 @@ public class HttpDownstreamClient implements DownstreamClient {
     private JsonNode execute(HttpRequest request) {
         try {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 409) {
+                // Business-state conflict (e.g. billing: a refund already awaiting card credit), not
+                // an outage — distinct type so the refund path can report it as "in progress".
+                throw new DownstreamConflictException("Downstream " + request.uri() + " returned HTTP 409");
+            }
             if (response.statusCode() >= 400) {
                 throw new DownstreamCallException("Downstream " + request.uri() + " returned HTTP "
                         + response.statusCode(), null);
