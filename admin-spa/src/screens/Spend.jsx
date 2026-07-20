@@ -136,7 +136,7 @@ function PaymentsHealthPanel({ health, error }) {
         </div>
         <Stat
           value={fmtCount(health.stuckTopupCount)}
-          label={`stuck top-ups (may include abandoned; ${health.stuckTopupThresholdMinutes ?? 15}m+)`}
+          label={`stuck top-ups (${health.stuckTopupThresholdMinutes ?? 15}m+, uncredited)`}
         />
         <Stat value={fmtCount(health.abandonedTopupCount)} label="abandoned top-ups" />
         <Stat value={relativeTime(health.lastCompletedWebhookAt)} label="last webhook" />
