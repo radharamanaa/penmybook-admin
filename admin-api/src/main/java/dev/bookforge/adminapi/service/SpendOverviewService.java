@@ -5,6 +5,7 @@ import dev.bookforge.adminapi.dto.GlobalSpendOverview;
 import dev.bookforge.adminapi.dto.GlobalWalletSummaryView;
 import dev.bookforge.adminapi.dto.MoneyFlowsView;
 import dev.bookforge.adminapi.dto.OwnerSpendOverview;
+import dev.bookforge.adminapi.dto.PaymentHealthView;
 import dev.bookforge.adminapi.dto.SpendReportView;
 import dev.bookforge.adminapi.dto.WalletSummaryView;
 import org.springframework.stereotype.Service;
@@ -63,6 +64,10 @@ public class SpendOverviewService {
 
     public MoneyFlowsView moneyFlows() {
         return downstream.walletFlows();
+    }
+
+    public PaymentHealthView paymentsHealth() {
+        return downstream.paymentsHealth();
     }
 
     private OwnerSpendOverview ownerOverview(String ownerKind, String ownerType, UUID ownerId) {

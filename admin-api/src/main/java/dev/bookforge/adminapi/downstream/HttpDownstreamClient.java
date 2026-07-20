@@ -9,6 +9,7 @@ import dev.bookforge.adminapi.dto.GlobalWalletSummaryView;
 import dev.bookforge.adminapi.dto.MoneyFlowsView;
 import dev.bookforge.adminapi.dto.OrgPricingRuleView;
 import dev.bookforge.adminapi.dto.OrgView;
+import dev.bookforge.adminapi.dto.PaymentHealthView;
 import dev.bookforge.adminapi.dto.PlatformAdminUpdateView;
 import dev.bookforge.adminapi.dto.SpendActionEntry;
 import dev.bookforge.adminapi.dto.SpendReportView;
@@ -494,6 +495,22 @@ public class HttpDownstreamClient implements DownstreamClient {
                 requireLong(json, "allTimeSpentCents", source));
     }
 
+    @Override
+    @CircuitBreaker(name = CB_BILLING_REPORTS)
+    public PaymentHealthView paymentsHealth() {
+        String url = downstream.billingUrl() + "/internal/admin/payments/health";
+        JsonNode json = get(url, BILLING_AUD, ADMIN_RPC_TIMEOUT);
+        String source = "billing payments health";
+        return new PaymentHealthView(
+                requireLong(json, "stuckRefundCount", source),
+                requireLong(json, "stuckTopupCount", source),
+                requireLong(json, "abandonedTopupCount", source),
+                parseNullableInstant(json, "lastCompletedWebhookAt"),
+                requireLong(json, "completedWebhooks24h", source),
+                requireLong(json, "stuckRefundThresholdMinutes", source),
+                requireLong(json, "stuckTopupThresholdMinutes", source));
+    }
+
     /**
      * Strict accessor for money fields: a missing or non-numeric cents field in a 2xx body is
      * a wire-contract break — surfacing it as $0.00 on an exact-cents dashboard would be a
@@ -506,6 +523,15 @@ public class HttpDownstreamClient implements DownstreamClient {
                     "Missing/non-numeric field '" + field + "' in " + source + " response", null);
         }
         return node.asLong();
+    }
+
+    /** Nullable Instant — never route through requireLong (timestamps are ISO-8601 strings). */
+    private static Instant parseNullableInstant(JsonNode json, String field) {
+        JsonNode node = json.get(field);
+        if (node == null || node.isNull() || node.asText().isBlank()) {
+            return null;
+        }
+        return Instant.parse(node.asText());
     }
 
     // ───────── Internals ─────────

@@ -98,6 +98,54 @@ function FlowsPanel({ flows }) {
   )
 }
 
+function relativeTime(iso) {
+  if (!iso) return 'never'
+  const ms = Date.now() - new Date(iso).getTime()
+  if (Number.isNaN(ms)) return 'unknown'
+  const mins = Math.round(ms / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.round(mins / 60)
+  if (hours < 48) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
+}
+
+function PaymentsHealthPanel({ health, error }) {
+  if (error) {
+    return (
+      <div className="panel">
+        <h2 style={{ marginTop: 0 }}>Payments health</h2>
+        <div className="msg error">{error}</div>
+      </div>
+    )
+  }
+  if (!health) return null
+  const stuckRefunds = health.stuckRefundCount ?? 0
+  return (
+    <div className="panel">
+      <h2 style={{ marginTop: 0 }}>Payments health</h2>
+      <p className="sub">
+        Paddle integration signal — stuck card refunds, uncredited top-ups, and webhook recency.
+      </p>
+      <div className="stats">
+        <div>
+          <div className="stat" style={stuckRefunds > 0 ? { color: '#b42318' } : undefined}>
+            {fmtCount(stuckRefunds)}
+          </div>
+          <div className="stat-label">stuck refunds</div>
+        </div>
+        <Stat
+          value={fmtCount(health.stuckTopupCount)}
+          label={`stuck top-ups (may include abandoned; ${health.stuckTopupThresholdMinutes ?? 15}m+)`}
+        />
+        <Stat value={fmtCount(health.abandonedTopupCount)} label="abandoned top-ups" />
+        <Stat value={relativeTime(health.lastCompletedWebhookAt)} label="last webhook" />
+        <Stat value={fmtCount(health.completedWebhooks24h)} label="webhooks (24h)" />
+      </div>
+    </div>
+  )
+}
+
 /** One usage column (books/chapters figures for a lane or an owner). */
 function usageRows(usage) {
   return [
@@ -158,6 +206,8 @@ export default function Spend() {
   const [global, setGlobal] = useState(null)
   const [flows, setFlows] = useState(null)
   const [lanes, setLanes] = useState(null)
+  const [paymentsHealth, setPaymentsHealth] = useState(null)
+  const [paymentsHealthError, setPaymentsHealthError] = useState(null)
   const [mode, setMode] = useState('user') // 'user' | 'org'
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
@@ -175,10 +225,19 @@ export default function Spend() {
   const lookupSeq = useRef(0)
 
   const loadGlobal = useCallback(async () => {
-    const [g, f, l] = await Promise.allSettled([api.spendGlobal(), api.spendFlows(), api.usageLanes()])
+    const [g, f, l, h] = await Promise.allSettled([
+      api.spendGlobal(), api.spendFlows(), api.usageLanes(), api.paymentsHealth(),
+    ])
     if (g.status === 'fulfilled') setGlobal(g.value)
     if (f.status === 'fulfilled') setFlows(f.value)
     if (l.status === 'fulfilled') setLanes(l.value)
+    if (h.status === 'fulfilled') {
+      setPaymentsHealth(h.value)
+      setPaymentsHealthError(null)
+    } else {
+      setPaymentsHealth(null)
+      setPaymentsHealthError(h.reason?.message ?? 'payments health unavailable')
+    }
     const failed = [g, f, l].filter((r) => r.status === 'rejected')
     if (failed.length > 0) setError(failed[0].reason?.message ?? 'failed to load global figures')
   }, [])
@@ -262,6 +321,7 @@ export default function Spend() {
         </div>
       )}
       <FlowsPanel flows={flows} />
+      <PaymentsHealthPanel health={paymentsHealth} error={paymentsHealthError} />
       <LanesPanel lanes={lanes} />
       {global && <ByActionPanel byAction={global.byAction} />}
 

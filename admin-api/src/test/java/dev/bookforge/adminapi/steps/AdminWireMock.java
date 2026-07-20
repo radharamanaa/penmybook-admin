@@ -68,6 +68,7 @@ public class AdminWireMock {
         stubOrgView();
         // Phase 3b — admin-portal HTTP surface ↓
         stubBillingWalletCredit();
+        stubBillingPaymentsHealth();
         stubEntitlementsSetPlatformAdmin();
         stubEntitlementsUserSearch();
         stubEntitlementsWaitlist();
@@ -151,6 +152,18 @@ public class AdminWireMock {
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")
                         .withBody("{\"balanceCents\":1500}")));
+    }
+
+    /** billing {@code GET /internal/admin/payments/health} — payment-integration health relay. */
+    private static void stubBillingPaymentsHealth() {
+        server.stubFor(get(urlPathEqualTo("/internal/admin/payments/health"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"stuckRefundCount\":1,\"stuckTopupCount\":2,\"abandonedTopupCount\":3,"
+                                + "\"lastCompletedWebhookAt\":\"2026-07-20T12:00:00Z\","
+                                + "\"completedWebhooks24h\":4,"
+                                + "\"stuckRefundThresholdMinutes\":60,\"stuckTopupThresholdMinutes\":15}")));
     }
 
     /** entitlements {@code PATCH /internal/admin/users/{userId}} — set is_platform_admin. */

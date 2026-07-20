@@ -347,6 +347,38 @@ public class PortalAdminSteps {
         lastResponse = send(HttpMethod.POST, "/v1/admin/waitlist/config", body);
     }
 
+    // ───────── When — payments health ─────────
+
+    @When("they read payments health")
+    public void readPaymentsHealth() {
+        lastResponse = sendGet("/v1/admin/payments/health");
+    }
+
+    @When("they attempt to read payments health")
+    public void attemptReadPaymentsHealth() {
+        lastResponse = sendGet("/v1/admin/payments/health");
+    }
+
+    @And("the payments health reports stuck refunds {int}")
+    public void paymentsHealthStuckRefunds(int n) {
+        assertThat(parseBody().path("stuckRefundCount").asLong()).isEqualTo(n);
+    }
+
+    @And("the payments health reports stuck top-ups {int}")
+    public void paymentsHealthStuckTopups(int n) {
+        assertThat(parseBody().path("stuckTopupCount").asLong()).isEqualTo(n);
+    }
+
+    @And("the payments health reports abandoned top-ups {int}")
+    public void paymentsHealthAbandonedTopups(int n) {
+        assertThat(parseBody().path("abandonedTopupCount").asLong()).isEqualTo(n);
+    }
+
+    @And("the payments health reports webhooks 24h {int}")
+    public void paymentsHealthWebhooks24h(int n) {
+        assertThat(parseBody().path("completedWebhooks24h").asLong()).isEqualTo(n);
+    }
+
     @And("the search result includes account status {string}")
     public void searchHasStatus(String status) {
         JsonNode body = parseBody();

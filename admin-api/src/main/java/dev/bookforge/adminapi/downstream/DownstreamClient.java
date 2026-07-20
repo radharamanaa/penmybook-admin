@@ -6,6 +6,7 @@ import dev.bookforge.adminapi.dto.GlobalWalletSummaryView;
 import dev.bookforge.adminapi.dto.MoneyFlowsView;
 import dev.bookforge.adminapi.dto.OrgPricingRuleView;
 import dev.bookforge.adminapi.dto.OrgView;
+import dev.bookforge.adminapi.dto.PaymentHealthView;
 import dev.bookforge.adminapi.dto.PlatformAdminUpdateView;
 import dev.bookforge.adminapi.dto.SpendReportView;
 import dev.bookforge.adminapi.dto.UserSearchResultEntry;
@@ -177,4 +178,7 @@ public interface DownstreamClient {
 
     /** billing {@code GET /internal/admin/wallet/flows} — loaded vs spent per rolling window. */
     MoneyFlowsView walletFlows();
+
+    /** billing {@code GET /internal/admin/payments/health} — stuck refunds / top-ups / webhook recency. */
+    PaymentHealthView paymentsHealth();
 }

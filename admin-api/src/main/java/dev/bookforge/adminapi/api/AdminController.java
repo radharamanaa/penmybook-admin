@@ -18,6 +18,7 @@ import dev.bookforge.adminapi.dto.GrantCreditsRequest;
 import dev.bookforge.adminapi.dto.OrgPricingRequest;
 import dev.bookforge.adminapi.dto.OrgPricingRuleView;
 import dev.bookforge.adminapi.dto.OwnerSpendOverview;
+import dev.bookforge.adminapi.dto.PaymentHealthView;
 import dev.bookforge.adminapi.dto.PlatformAdminUpdateView;
 import dev.bookforge.adminapi.dto.RefundReceiptView;
 import dev.bookforge.adminapi.dto.RefundRequest;
@@ -459,6 +460,17 @@ public class AdminController {
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public MoneyFlowsView spendFlows() {
         return spendOverviewService.moneyFlows();
+    }
+
+    /**
+     * Payment-integration health (stuck refunds, uncredited/abandoned top-ups, webhook recency).
+     *
+     * <p>Authorisation: {@code hasRole('PLATFORM_ADMIN')}. Read-only — no audit row.
+     */
+    @GetMapping("/payments/health")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public PaymentHealthView paymentsHealth() {
+        return spendOverviewService.paymentsHealth();
     }
 
     // ───────── 6. GET books for user ─────────

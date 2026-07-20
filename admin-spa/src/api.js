@@ -170,6 +170,7 @@ export const api = {
   // ── spend dashboard: exact-cents money (admin-api → entitlements + billing) ──
   spendGlobal: () => request('/api/v1/admin/spend/global'),
   spendFlows: () => request('/api/v1/admin/spend/flows'),
+  paymentsHealth: () => request('/api/v1/admin/payments/health'),
   userSpend: (userId) => request(`/api/v1/admin/users/${userId}/spend`),
   orgSpend: (orgId) => request(`/api/v1/admin/orgs/${orgId}/spend`),
   // ── spend dashboard: product usage (book_admin proxy → curator Mongo rollup) ──
