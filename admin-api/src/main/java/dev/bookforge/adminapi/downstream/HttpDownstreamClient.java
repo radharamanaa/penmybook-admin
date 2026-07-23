@@ -347,21 +347,30 @@ public class HttpDownstreamClient implements DownstreamClient {
 
     @Override
     @CircuitBreaker(name = CB_ENTITLEMENTS)
-    public OrgPricingRuleView upsertOrgPricing(UUID orgId, String action, long valueCents) {
+    public OrgPricingRuleView upsertOrgPricing(UUID orgId, String action, String category,
+                                               long valueCents) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("orgId", orgId.toString());
         body.put("action", action);
         body.put("valueCents", valueCents);
-        return postPricingOverride("/internal/pricing/org-override", orgId, action, valueCents, body);
+        if (category != null && !category.isBlank()) {
+            body.put("category", category);
+        }
+        return postPricingOverride("/internal/pricing/org-override", orgId, action, category,
+                valueCents, body);
     }
 
     @Override
     @CircuitBreaker(name = CB_ENTITLEMENTS)
-    public OrgPricingRuleView upsertGlobalPricing(String action, long valueCents) {
+    public OrgPricingRuleView upsertGlobalPricing(String action, String category, long valueCents) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("action", action);
         body.put("valueCents", valueCents);
-        return postPricingOverride("/internal/pricing/global-override", null, action, valueCents, body);
+        if (category != null && !category.isBlank()) {
+            body.put("category", category);
+        }
+        return postPricingOverride("/internal/pricing/global-override", null, action, category,
+                valueCents, body);
     }
 
     @Override
@@ -381,7 +390,8 @@ public class HttpDownstreamClient implements DownstreamClient {
     }
 
     private OrgPricingRuleView postPricingOverride(String path, UUID orgId, String action,
-                                                   long valueCents, Map<String, Object> body) {
+                                                   String category, long valueCents,
+                                                   Map<String, Object> body) {
         String url = downstream.entitlementsUrl() + path;
         JsonNode json = send(url, ENTITLEMENTS_AUD, toJson(body), ADMIN_RPC_TIMEOUT);
         long persistedValue = json.path("valueCents").asLong(valueCents);
@@ -389,7 +399,12 @@ public class HttpDownstreamClient implements DownstreamClient {
                 ? json.path("previousValueCents").asLong() : null;
         String updatedAtRaw = textOrNull(json, "updatedAt");
         Instant updatedAt = updatedAtRaw == null ? Instant.now() : Instant.parse(updatedAtRaw);
-        return new OrgPricingRuleView(orgId, action, persistedValue, previous, updatedAt);
+        String persistedCategory = textOrNull(json, "category");
+        if (persistedCategory == null) {
+            persistedCategory = category;
+        }
+        return new OrgPricingRuleView(orgId, action, persistedCategory, persistedValue, previous,
+                updatedAt);
     }
 
     @Override

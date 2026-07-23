@@ -288,18 +288,31 @@ public class PortalAdminSteps {
 
     @When("they attempt to upsert per-org pricing for action {string} at {long} cents")
     public void attemptOrgPricing(String action, long valueCents) {
-        orgPricing(action, valueCents);
+        orgPricing(action, null, valueCents);
     }
 
     @When("they upsert per-org pricing for action {string} at {long} cents")
     public void doOrgPricing(String action, long valueCents) {
-        orgPricing(action, valueCents);
+        orgPricing(action, null, valueCents);
     }
 
-    private void orgPricing(String action, long valueCents) {
+    @When("they attempt to upsert per-org pricing for action {string} genre {string} at {long} cents")
+    public void attemptOrgPricingGenre(String action, String genre, long valueCents) {
+        orgPricing(action, genre, valueCents);
+    }
+
+    @When("they upsert per-org pricing for action {string} genre {string} at {long} cents")
+    public void doOrgPricingGenre(String action, String genre, long valueCents) {
+        orgPricing(action, genre, valueCents);
+    }
+
+    private void orgPricing(String action, String category, long valueCents) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("action", action);
         body.put("valueCents", valueCents);
+        if (category != null && !category.isBlank()) {
+            body.put("category", category);
+        }
         lastResponse = send(HttpMethod.POST,
                 "/v1/admin/orgs/" + TARGET_ORG + "/pricing", body);
     }

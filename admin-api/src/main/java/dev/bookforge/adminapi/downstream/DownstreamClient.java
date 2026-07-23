@@ -115,14 +115,14 @@ public interface DownstreamClient {
      * override. Returns the persisted row + the prior value (null on first insert) so the
      * controller can record both halves in the audit log.
      */
-    OrgPricingRuleView upsertOrgPricing(UUID orgId, String action, long valueCents);
+    OrgPricingRuleView upsertOrgPricing(UUID orgId, String action, String category, long valueCents);
 
     /**
      * entitlements {@code POST /internal/pricing/global-override} — replace the GLOBAL default
      * price for an action (admin control plane D5/D13; $0 is legal — free digital publish).
      * Returned view carries {@code orgId=null}.
      */
-    OrgPricingRuleView upsertGlobalPricing(String action, long valueCents);
+    OrgPricingRuleView upsertGlobalPricing(String action, String category, long valueCents);
 
     /**
      * entitlements {@code GET /internal/pricing/active-by-action} — current GLOBAL price (cents)

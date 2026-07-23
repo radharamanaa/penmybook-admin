@@ -4,14 +4,14 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Response body for {@code POST /v1/admin/orgs/{orgId}/pricing}. Reflects the persisted
- * {@code pricing_rules} row after the upsert. {@code previousValueCents} is {@code null} on
- * first upsert (insert), populated on subsequent calls (update) — admin-api uses this to
- * record old + new values in the audit_log row.
+ * Response body for pricing upserts. Reflects the persisted {@code pricing_rules} row.
+ * {@code previousValueCents} is {@code null} on first upsert; {@code category} is set when
+ * the override targeted a per-genre chapter price.
  */
 public record OrgPricingRuleView(
         UUID orgId,
         String action,
+        String category,
         long valueCents,
         Long previousValueCents,
         Instant updatedAt

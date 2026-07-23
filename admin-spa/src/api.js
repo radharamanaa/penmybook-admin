@@ -147,10 +147,16 @@ export const api = {
     }),
   // ── pricing (admin-api → entitlements) ──
   getPricing: () => request('/api/v1/admin/pricing'),
-  upsertGlobalPricing: (action, valueCents) =>
-    request('/api/v1/admin/pricing', { method: 'POST', body: { action, valueCents } }),
-  upsertOrgPricing: (orgId, action, valueCents) =>
-    request(`/api/v1/admin/orgs/${orgId}/pricing`, { method: 'POST', body: { action, valueCents } }),
+  upsertGlobalPricing: (action, valueCents, category = null) =>
+    request('/api/v1/admin/pricing', {
+      method: 'POST',
+      body: category ? { action, valueCents, category } : { action, valueCents },
+    }),
+  upsertOrgPricing: (orgId, action, valueCents, category = null) =>
+    request(`/api/v1/admin/orgs/${orgId}/pricing`, {
+      method: 'POST',
+      body: category ? { action, valueCents, category } : { action, valueCents },
+    }),
 
   // ── waitlist (admin-api → entitlements) ──
   waitlistQueue: (limit = 50) => request(`/api/v1/admin/waitlist?limit=${limit}`),

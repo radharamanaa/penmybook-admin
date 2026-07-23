@@ -4,22 +4,21 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 
 /**
- * Request body for {@code POST /v1/admin/orgs/{orgId}/pricing}. Upserts a per-org pricing
- * override into {@code entitlements.pricing_rules} keyed by {@code (action, org_id)}.
+ * Request body for {@code POST /v1/admin/orgs/{orgId}/pricing} and
+ * {@code POST /v1/admin/pricing}. Upserts a pricing rule into
+ * {@code entitlements.pricing_rules} keyed by {@code (code, org_id)}.
  *
- * <p>R26 (master plan §6): pricing is a contractual decision and MUST be platform-mediated —
- * the endpoint is gated by {@code hasRole('PLATFORM_ADMIN')} so an org owner cannot
- * self-discount. Every call writes an {@code admin_api.audit_log} row capturing old + new value.
+ * <p>{@code category} is required when {@code action == CHAPTER_GENERATE} so the
+ * override targets a {@code per_subtopic_<genre>} row; ignored for other actions.
  *
- * @param action     the entitlement action being repriced; uses the locked enum from X1
- *                   ({@code CHAPTER_GENERATE}, {@code COVER_GENERATE}, {@code COVER_REGEN},
- *                   {@code CHAPTER_EDIT}). Never {@code GENERATE_CHAPTER}.
- * @param valueCents the per-action cost in integer cents to apply for this org. Must be {@code >= 0}.
- *                   {@code 0} is a valid value (free for that org).
+ * @param action     the entitlement action being repriced
+ * @param valueCents the per-unit cost in integer cents ({@code >= 0}; {@code 0} = free)
+ * @param category   book genre for CHAPTER_GENERATE ({@code technical}, {@code science_fiction}, …)
  */
 public record OrgPricingRequest(
         @NotBlank(message = "action is required")
         String action,
         @Min(value = 0, message = "valueCents must be >= 0")
-        long valueCents
+        long valueCents,
+        String category
 ) {}

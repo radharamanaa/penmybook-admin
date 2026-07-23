@@ -1,14 +1,19 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api.js'
 
+/** Row key = action, or action:category for per-genre chapter prices. */
 const ACTIONS = [
-  { value: 'CHAPTER_GENERATE', label: 'Chapter generation' },
-  { value: 'COVER_GENERATE', label: 'Cover generation' },
-  { value: 'CHAPTER_EDIT', label: 'Chapter edit overflow' },
-  { value: 'COVER_REGEN', label: 'Cover regen overflow' },
-  { value: 'PUBLISH_DIGITAL', label: 'Publish — digital PDF' },
-  { value: 'PUBLISH_PAPERBACK', label: 'Publish — paperback' },
-  { value: 'PUBLISH_KINDLE', label: 'Publish — Kindle' },
+  { value: 'CHAPTER_GENERATE:technical', action: 'CHAPTER_GENERATE', category: 'technical', label: 'Chapter — technical (¢/subtopic)' },
+  { value: 'CHAPTER_GENERATE:science_fiction', action: 'CHAPTER_GENERATE', category: 'science_fiction', label: 'Chapter — science fiction (¢/subtopic)' },
+  { value: 'CHAPTER_GENERATE:literary_fiction', action: 'CHAPTER_GENERATE', category: 'literary_fiction', label: 'Chapter — literary fiction (¢/subtopic)' },
+  { value: 'CHAPTER_GENERATE:screenplay', action: 'CHAPTER_GENERATE', category: 'screenplay', label: 'Chapter — screenplay (¢/subtopic)' },
+  { value: 'CHAPTER_GENERATE:childrens', action: 'CHAPTER_GENERATE', category: 'childrens', label: "Chapter — children's (¢/subtopic)" },
+  { value: 'COVER_GENERATE', action: 'COVER_GENERATE', category: null, label: 'Cover generation' },
+  { value: 'CHAPTER_EDIT', action: 'CHAPTER_EDIT', category: null, label: 'Chapter edit overflow' },
+  { value: 'COVER_REGEN', action: 'COVER_REGEN', category: null, label: 'Cover regen overflow' },
+  { value: 'PUBLISH_DIGITAL', action: 'PUBLISH_DIGITAL', category: null, label: 'Publish — digital PDF' },
+  { value: 'PUBLISH_PAPERBACK', action: 'PUBLISH_PAPERBACK', category: null, label: 'Publish — paperback' },
+  { value: 'PUBLISH_KINDLE', action: 'PUBLISH_KINDLE', category: null, label: 'Publish — Kindle' },
 ]
 
 const dollars = (cents) =>
@@ -22,8 +27,8 @@ const dollars = (cents) =>
  * to save the edits as that org's overrides (admin-api → entitlements pricing_rules).
  */
 export default function Pricing() {
-  const [current, setCurrent] = useState(null) // { ACTION: cents }
-  const [drafts, setDrafts] = useState({}) // { ACTION: centsString } — raw while editing
+  const [current, setCurrent] = useState(null) // { ACTION or ACTION:genre: cents }
+  const [drafts, setDrafts] = useState({}) // { key: centsString } — raw while editing
   const [orgId, setOrgId] = useState('')
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
@@ -40,13 +45,13 @@ export default function Pricing() {
   }
   useEffect(() => { loadCurrent() }, [])
 
-  function centsFor(action) {
-    return drafts[action] !== undefined ? drafts[action] : current?.[action] ?? ''
+  function centsFor(key) {
+    return drafts[key] !== undefined ? drafts[key] : current?.[key] ?? ''
   }
-  function rowChanged(action) {
-    const d = drafts[action]
+  function rowChanged(key) {
+    const d = drafts[key]
     if (d === undefined || String(d).trim() === '') return false
-    return Number(d) !== Number(current?.[action])
+    return Number(d) !== Number(current?.[key])
   }
   const dirty = ACTIONS.filter((a) => rowChanged(a.value))
 
@@ -57,8 +62,11 @@ export default function Pricing() {
     try {
       for (const a of dirty) {
         const cents = Number(drafts[a.value])
-        if (orgId.trim()) await api.upsertOrgPricing(orgId.trim(), a.value, cents)
-        else await api.upsertGlobalPricing(a.value, cents)
+        if (orgId.trim()) {
+          await api.upsertOrgPricing(orgId.trim(), a.action, cents, a.category)
+        } else {
+          await api.upsertGlobalPricing(a.action, cents, a.category)
+        }
       }
       setResult({ count: dirty.length, org: orgId.trim() || null })
       setDrafts({})
@@ -73,8 +81,8 @@ export default function Pricing() {
       <h1>Pricing &amp; billing</h1>
       <p className="sub">
         Customer prices, resolved per charge: org override → global rule → config default.
-        $0 is legal (digital publish is free, D13). Changes are versioned, audited, and live
-        within the 30s pricing cache. Discounts are deferred (D10).
+        Chapter generation is priced per subtopic by genre. $0 is legal (digital publish is
+        free, D13). Changes are versioned, audited, and live within the 30s pricing cache.
       </p>
 
       {loadErr && (

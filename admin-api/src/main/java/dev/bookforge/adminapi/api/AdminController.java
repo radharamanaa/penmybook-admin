@@ -547,16 +547,24 @@ public class AdminController {
                                                @Valid @RequestBody OrgPricingRequest body,
                                                @AuthenticationPrincipal Jwt jwt,
                                                HttpServletRequest request) {
-        OrgPricingRuleView persisted = downstream.upsertOrgPricing(orgId, body.action(), body.valueCents());
+        requireCategoryForChapter(body);
+        OrgPricingRuleView persisted = downstream.upsertOrgPricing(
+                orgId, body.action(), body.category(), body.valueCents());
         Map<String, Object> oldValue = null;
         if (persisted.previousValueCents() != null) {
             oldValue = new LinkedHashMap<>();
             oldValue.put("action", body.action());
             oldValue.put("valueCents", persisted.previousValueCents());
+            if (body.category() != null) {
+                oldValue.put("category", body.category());
+            }
         }
         Map<String, Object> newValue = new LinkedHashMap<>();
         newValue.put("action", body.action());
         newValue.put("valueCents", persisted.valueCents());
+        if (body.category() != null) {
+            newValue.put("category", body.category());
+        }
         auditEventWriter.writeAllow(actorOf(jwt), ACTION_UPSERT_ORG_PRICING, RESOURCE_ORG,
                 orgId.toString(), oldValue, newValue, clientIp(request));
         return persisted;
@@ -650,19 +658,37 @@ public class AdminController {
     public OrgPricingRuleView upsertGlobalPricing(@Valid @RequestBody OrgPricingRequest body,
                                                   @AuthenticationPrincipal Jwt jwt,
                                                   HttpServletRequest request) {
-        OrgPricingRuleView persisted = downstream.upsertGlobalPricing(body.action(), body.valueCents());
+        requireCategoryForChapter(body);
+        OrgPricingRuleView persisted = downstream.upsertGlobalPricing(
+                body.action(), body.category(), body.valueCents());
         Map<String, Object> oldValue = null;
         if (persisted.previousValueCents() != null) {
             oldValue = new LinkedHashMap<>();
             oldValue.put("action", body.action());
             oldValue.put("valueCents", persisted.previousValueCents());
+            if (body.category() != null) {
+                oldValue.put("category", body.category());
+            }
         }
         Map<String, Object> newValue = new LinkedHashMap<>();
         newValue.put("action", body.action());
         newValue.put("valueCents", persisted.valueCents());
+        if (body.category() != null) {
+            newValue.put("category", body.category());
+        }
         auditEventWriter.writeAllow(actorOf(jwt), ACTION_UPSERT_GLOBAL_PRICING, RESOURCE_PRICING,
                 "global", oldValue, newValue, clientIp(request));
         return persisted;
+    }
+
+    /** CHAPTER_GENERATE overrides must name a genre so they hit per_subtopic_* rows. */
+    private static void requireCategoryForChapter(OrgPricingRequest body) {
+        if ("CHAPTER_GENERATE".equals(body.action())
+                && (body.category() == null || body.category().isBlank())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "category is required when action is CHAPTER_GENERATE");
+        }
     }
 
     // ───────── Helpers ─────────
