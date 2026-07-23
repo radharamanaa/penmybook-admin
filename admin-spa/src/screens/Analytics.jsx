@@ -5,10 +5,12 @@ const PERIODS = ['last_week', 'last_month', 'last_3_months', 'last_year']
 
 /**
  * Cutover for per-book COGS vs charges: older books lack editor token COGS and
- * may have truncated charge history — variance would mislead. Default list
- * window never starts before this date.
+ * may have truncated charge history — variance would mislead, so the list window
+ * never starts before this date. Env-driven (VITE_CHARGES_CUTOVER) so it's set
+ * per-environment: a QA date to hide pre-feature books, EMPTY on a fresh account
+ * (e.g. prod) where every book is fully accounted → show all, no cutover.
  */
-const CHARGES_COMPARISON_CUTOVER = '2026-07-23T00:00:00.000Z'
+const CHARGES_COMPARISON_CUTOVER = import.meta.env.VITE_CHARGES_CUTOVER || ''
 
 const PERIOD_DAYS = {
   last_week: 7,
@@ -26,6 +28,10 @@ const usdToCents = (usd) => Math.round((usd ?? 0) * 100)
 function periodWindow(period) {
   const to = new Date()
   const from = new Date(to.getTime() - (PERIOD_DAYS[period] ?? 7) * 86400000)
+  // No cutover configured (fresh account) → clamp only to the period; show all books.
+  if (!CHARGES_COMPARISON_CUTOVER) {
+    return { fromDate: from.toISOString(), toDate: to.toISOString() }
+  }
   const cutover = new Date(CHARGES_COMPARISON_CUTOVER)
   return {
     fromDate: (from > cutover ? from : cutover).toISOString(),
@@ -152,8 +158,10 @@ export default function Analytics() {
       <div className="panel">
         <h2 style={{ marginTop: 0 }}>Per-book COGS vs charges</h2>
         <p className="sub">
-          Books created on/after {CHARGES_COMPARISON_CUTOVER.slice(0, 10)}. COGS from token
-          usage; charges billed are gross (pre-refund). Δ = charges − cost (cents).
+          {CHARGES_COMPARISON_CUTOVER
+            ? `Books created on/after ${CHARGES_COMPARISON_CUTOVER.slice(0, 10)}. `
+            : 'All books. '}
+          COGS from token usage; charges billed are gross (pre-refund). Δ = charges − cost (cents).
         </p>
         {chargesDegraded && (
           <div className="msg error">
@@ -173,7 +181,7 @@ export default function Analytics() {
           </thead>
           <tbody>
             {bookRows.length === 0 ? (
-              <tr><td colSpan={6} className="sub">No post-cutover books in this period.</td></tr>
+              <tr><td colSpan={6} className="sub">No books in this period.</td></tr>
             ) : bookRows.map((row) => (
               <tr key={row.book_id}>
                 <td>

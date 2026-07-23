@@ -21,7 +21,12 @@ name: bookforge-admin
 
 services:
   admin-spa:
-    build: ./admin-spa
+    build:
+      context: ./admin-spa
+      args:
+        # Empty by default (show all books); set VITE_CHARGES_CUTOVER in the box's
+        # .env (QA) to hide pre-feature books from the COGS-vs-charges table.
+        VITE_CHARGES_CUTOVER: "${VITE_CHARGES_CUTOVER:-}"
     ports:
       - "5174:80"
     depends_on:
