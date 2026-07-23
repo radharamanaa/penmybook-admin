@@ -23,6 +23,7 @@ import dev.bookforge.adminapi.dto.PlatformAdminUpdateView;
 import dev.bookforge.adminapi.dto.RefundReceiptView;
 import dev.bookforge.adminapi.dto.RefundRequest;
 import dev.bookforge.adminapi.dto.SetPlatformAdminRequest;
+import dev.bookforge.adminapi.dto.SpendByBooksResponse;
 import dev.bookforge.adminapi.dto.UserSearchResultEntry;
 import dev.bookforge.adminapi.dto.WalletBalanceView;
 import dev.bookforge.adminapi.dto.WalletTopUpRequest;
@@ -471,6 +472,18 @@ public class AdminController {
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public PaymentHealthView paymentsHealth() {
         return spendOverviewService.paymentsHealth();
+    }
+
+    /**
+     * Per-book GROSS wallet charges (pre-refund) for a batch of book ids. Used by the
+     * Analytics COGS vs charges table. Fail-soft downstream → empty list (zeros in UI).
+     *
+     * <p>Authorisation: {@code hasRole('PLATFORM_ADMIN')}. Read-only — no audit row.
+     */
+    @PostMapping("/spend/by-books")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public SpendByBooksResponse spendByBooks(@RequestBody List<String> bookIds) {
+        return spendOverviewService.chargesByBooks(bookIds);
     }
 
     // ───────── 6. GET books for user ─────────

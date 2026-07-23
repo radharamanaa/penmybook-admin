@@ -171,11 +171,19 @@ export const api = {
   analyticsConversations: (period = 'last_week') =>
     request(`/py/admin/analytics/conversations?period=${period}`),
   analyticsBooks: (period = 'last_week') => request(`/py/admin/analytics/books?period=${period}`),
+  analyticsBooksList: ({ period = 'last_week', fromDate, toDate, page = 1, limit = 20 } = {}) => {
+    const qs = new URLSearchParams({ period, page: String(page), limit: String(limit) })
+    if (fromDate) qs.set('from_date', fromDate)
+    if (toDate) qs.set('to_date', toDate)
+    return request(`/py/admin/analytics/books/list?${qs}`)
+  },
   analyticsLive: () => request('/py/admin/analytics/live'),
 
   // ── spend dashboard: exact-cents money (admin-api → entitlements + billing) ──
   spendGlobal: () => request('/api/v1/admin/spend/global'),
   spendFlows: () => request('/api/v1/admin/spend/flows'),
+  spendByBooks: (bookIds) =>
+    request('/api/v1/admin/spend/by-books', { method: 'POST', body: bookIds }),
   paymentsHealth: () => request('/api/v1/admin/payments/health'),
   userSpend: (userId) => request(`/api/v1/admin/users/${userId}/spend`),
   orgSpend: (orgId) => request(`/api/v1/admin/orgs/${orgId}/spend`),

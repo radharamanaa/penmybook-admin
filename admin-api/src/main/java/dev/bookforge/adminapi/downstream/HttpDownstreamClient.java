@@ -12,6 +12,8 @@ import dev.bookforge.adminapi.dto.OrgView;
 import dev.bookforge.adminapi.dto.PaymentHealthView;
 import dev.bookforge.adminapi.dto.PlatformAdminUpdateView;
 import dev.bookforge.adminapi.dto.SpendActionEntry;
+import dev.bookforge.adminapi.dto.SpendByBookChargeView;
+import dev.bookforge.adminapi.dto.SpendByBooksResponse;
 import dev.bookforge.adminapi.dto.SpendReportView;
 import dev.bookforge.adminapi.dto.UserSearchResultEntry;
 import dev.bookforge.adminapi.dto.WaitlistAdmitView;
@@ -61,6 +63,8 @@ public class HttpDownstreamClient implements DownstreamClient {
     private static final Duration STEP_UP_RPC_TIMEOUT = Duration.ofSeconds(1);
     /** Phase-3b admin-portal calls use the 5-second budget mandated by the task spec. */
     private static final Duration ADMIN_RPC_TIMEOUT = Duration.ofSeconds(5);
+    /** Per-book charges batch: tight budget; fail-soft on timeout so Analytics stays up. */
+    private static final Duration BY_BOOKS_RPC_TIMEOUT = Duration.ofSeconds(2);
     /** Circuit-breaker instance names — must match {@code application.yml}. */
     static final String CB_ENTITLEMENTS = "entitlements";
     static final String CB_BILLING = "billing";
@@ -443,6 +447,44 @@ public class HttpDownstreamClient implements DownstreamClient {
     public SpendReportView globalSpend() {
         String url = downstream.entitlementsUrl() + "/internal/admin/spend/global";
         return parseSpendReport(get(url, ENTITLEMENTS_AUD, ADMIN_RPC_TIMEOUT));
+    }
+
+    /**
+     * Per-book GROSS charges. Fail-soft on any transport/HTTP/parse failure so a slow
+     * entitlements never 502s the Analytics page — an empty list with {@code degraded=true}
+     * is returned (zeros render, and the UI shows a "lookup failed" warning so degraded
+     * entitlements is distinguishable from "no charges"). No circuit breaker: a dashboard
+     * miss must not open the entitlements-reports breaker used by spend tiles.
+     */
+    @Override
+    public SpendByBooksResponse chargesByBooks(List<String> bookIds) {
+        if (bookIds == null || bookIds.isEmpty()) {
+            return new SpendByBooksResponse(false, List.of());
+        }
+        try {
+            String url = downstream.entitlementsUrl() + "/internal/admin/spend/by-books";
+            String body = objectMapper.writeValueAsString(bookIds);
+            JsonNode json = send(url, ENTITLEMENTS_AUD, body, BY_BOOKS_RPC_TIMEOUT);
+            List<SpendByBookChargeView> out = new ArrayList<>();
+            if (json == null || !json.isArray()) {
+                return new SpendByBooksResponse(false, out);
+            }
+            for (JsonNode row : json) {
+                String bookId = textOrNull(row, "bookId");
+                if (bookId == null) {
+                    continue;
+                }
+                out.add(new SpendByBookChargeView(
+                        bookId,
+                        requireLong(row, "chargedCents", "entitlements spend by-books"),
+                        requireLong(row, "chargeCount", "entitlements spend by-books")));
+            }
+            return new SpendByBooksResponse(false, out);
+        } catch (Exception e) {
+            log.warn("entitlements spend/by-books fail-soft: returning degraded empty charges bookCount={} reason={}",
+                    bookIds.size(), e.toString());
+            return new SpendByBooksResponse(true, List.of());
+        }
     }
 
     private SpendReportView parseSpendReport(JsonNode json) {

@@ -6,10 +6,12 @@ import dev.bookforge.adminapi.dto.GlobalWalletSummaryView;
 import dev.bookforge.adminapi.dto.MoneyFlowsView;
 import dev.bookforge.adminapi.dto.OwnerSpendOverview;
 import dev.bookforge.adminapi.dto.PaymentHealthView;
+import dev.bookforge.adminapi.dto.SpendByBooksResponse;
 import dev.bookforge.adminapi.dto.SpendReportView;
 import dev.bookforge.adminapi.dto.WalletSummaryView;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -68,6 +70,15 @@ public class SpendOverviewService {
 
     public PaymentHealthView paymentsHealth() {
         return downstream.paymentsHealth();
+    }
+
+    /**
+     * Per-book GROSS charges (pre-refund). Downstream fail-softs to an empty list with
+     * {@code degraded=true}; books with no wallet rows are simply absent (caller treats
+     * missing as $0).
+     */
+    public SpendByBooksResponse chargesByBooks(List<String> bookIds) {
+        return downstream.chargesByBooks(bookIds);
     }
 
     private OwnerSpendOverview ownerOverview(String ownerKind, String ownerType, UUID ownerId) {

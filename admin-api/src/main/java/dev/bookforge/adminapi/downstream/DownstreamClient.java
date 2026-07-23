@@ -8,6 +8,7 @@ import dev.bookforge.adminapi.dto.OrgPricingRuleView;
 import dev.bookforge.adminapi.dto.OrgView;
 import dev.bookforge.adminapi.dto.PaymentHealthView;
 import dev.bookforge.adminapi.dto.PlatformAdminUpdateView;
+import dev.bookforge.adminapi.dto.SpendByBooksResponse;
 import dev.bookforge.adminapi.dto.SpendReportView;
 import dev.bookforge.adminapi.dto.UserSearchResultEntry;
 import dev.bookforge.adminapi.dto.WaitlistAdmitView;
@@ -166,6 +167,12 @@ public interface DownstreamClient {
 
     /** entitlements {@code GET /internal/admin/spend/global} — platform-wide GROSS spend. */
     SpendReportView globalSpend();
+
+    /**
+     * entitlements {@code POST /internal/admin/spend/by-books} — per-book GROSS wallet charges
+     * for the given book ids. Implementations fail-soft to an empty list with {@code degraded=true}.
+     */
+    SpendByBooksResponse chargesByBooks(List<String> bookIds);
 
     /**
      * billing {@code GET /internal/admin/wallet/summary?ownerType=&ownerId=} — an owner's exact
