@@ -179,6 +179,36 @@ export const api = {
   },
   analyticsLive: () => request('/py/admin/analytics/live'),
 
+  // ── feedback triage (book_admin → bookforge.feedback) ──
+  feedbackList: ({ page = 1, limit = 20 } = {}) =>
+    request(`/py/admin/feedback/list?page=${page}&limit=${limit}`),
+  resolveFeedback: (feedbackId, note) =>
+    request(`/py/admin/feedback/${encodeURIComponent(feedbackId)}/resolve`, {
+      method: 'POST',
+      body: { note },
+    }),
+  // Raw blob fetch — request() does resp.text()→JSON and cannot return bytes.
+  fetchFeedbackScreenshotBlob: async (screenshotId) => {
+    const headers = {}
+    if (_token) headers.Authorization = `Bearer ${_token}`
+    const resp = await fetch(
+      `/py/admin/feedback/screenshot/${encodeURIComponent(screenshotId)}`,
+      { headers },
+    )
+    if (resp.status === 401) {
+      _token = null
+      _onAuthExpired()
+      throw new ApiError(401, { detail: 'Session expired — sign in again.' })
+    }
+    if (!resp.ok) {
+      const text = await resp.text()
+      let body
+      try { body = JSON.parse(text) } catch { body = { detail: text } }
+      throw new ApiError(resp.status, body)
+    }
+    return resp.blob()
+  },
+
   // ── spend dashboard: exact-cents money (admin-api → entitlements + billing) ──
   spendGlobal: () => request('/api/v1/admin/spend/global'),
   spendFlows: () => request('/api/v1/admin/spend/flows'),

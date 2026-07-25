@@ -18,6 +18,14 @@ class Settings:
     MONGODB_URL: str = os.environ.get("MONGODB_URL", "mongodb://localhost:27017")
     MONGODB_DB_NAME: str = os.environ.get("MONGODB_DB_NAME", "bookforge")
 
+    # Dedicated feedback-scoped DocumentDB user (find+remove on feedback +
+    # feedback_screenshots ONLY). Empty → fall back to MONGODB_URL for local
+    # docker-compose; production MUST set the scoped creds via SSM.
+    FEEDBACK_MONGODB_URL: str = os.environ.get("FEEDBACK_MONGODB_URL", "")
+    # Pin the app DB name explicitly so the feedback read path is correct
+    # regardless of book_admin's ambiguous primary MONGODB_DB_NAME.
+    APP_MONGODB_DB_NAME: str = os.environ.get("APP_MONGODB_DB_NAME", "bookforge")
+
     # Seed value for max_concurrent_generations the first time the singleton is
     # created. After that the live value comes from the admin_settings document
     # (editable from the dashboard) — this env var is only the initial default.

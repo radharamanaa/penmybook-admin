@@ -39,6 +39,11 @@ services:
     environment:
       MONGODB_URL: ${ADMIN_MONGODB_URL:-mongodb://admin_mongo:27017}
       MONGODB_DB_NAME: ${ADMIN_MONGODB_DB_NAME:-bookforge_admin}
+      # Feedback triage reads bookforge.feedback via a dedicated Motor client.
+      # Empty FEEDBACK_MONGODB_URL → falls back to MONGODB_URL (local only).
+      # Prod/QA: set FEEDBACK_MONGODB_URL to the feedbackOps-scoped URI from SSM.
+      FEEDBACK_MONGODB_URL: ${FEEDBACK_MONGODB_URL:-}
+      APP_MONGODB_DB_NAME: ${APP_MONGODB_DB_NAME:-bookforge}
       ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET:-dev-insecure-admin-secret-change-me-32b!}
       ADMIN_JWT_TTL_MIN: ${ADMIN_JWT_TTL_MIN:-60}
       ADMIN_FRONTEND_ORIGIN: ${ADMIN_FRONTEND_ORIGIN:-http://localhost:5174}

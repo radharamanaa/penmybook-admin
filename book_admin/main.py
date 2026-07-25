@@ -27,6 +27,7 @@ from api.routers.admin_config import router as admin_config_router
 from api.routers.admin_users import router as admin_users_router
 from api.routers.analytics_proxy import router as analytics_proxy_router
 from api.routers.auth import router as auth_router
+from api.routers.feedback import router as feedback_router
 from api.routers.health import router as health_router
 
 _logger = logging.getLogger(__name__)
@@ -61,3 +62,4 @@ app.include_router(admin_router, prefix="/admin")
 app.include_router(admin_users_router, prefix="/admin")
 app.include_router(admin_config_router, prefix="/admin")
 app.include_router(analytics_proxy_router, prefix="/admin")
+app.include_router(feedback_router, prefix="/admin")
