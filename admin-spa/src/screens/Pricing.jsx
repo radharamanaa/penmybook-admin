@@ -14,6 +14,7 @@ const ACTIONS = [
   { value: 'PUBLISH_DIGITAL', action: 'PUBLISH_DIGITAL', category: null, label: 'Publish — digital PDF' },
   { value: 'PUBLISH_PAPERBACK', action: 'PUBLISH_PAPERBACK', category: null, label: 'Publish — paperback' },
   { value: 'PUBLISH_KINDLE', action: 'PUBLISH_KINDLE', category: null, label: 'Publish — Kindle' },
+  { value: 'PUBLISH_EPUB', action: 'PUBLISH_EPUB', category: null, label: 'Publish — EPUB' },
 ]
 
 const dollars = (cents) =>
