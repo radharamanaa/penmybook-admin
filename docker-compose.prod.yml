@@ -10,10 +10,25 @@
 #   `up` never starts a local Mongo.
 # - Caps the admin-api JVM heap for the shared 16 GiB box (≈1.8 GiB total heap
 #   across entitlements/billing/org/admin-api).
+# - Gives the three app services `restart: unless-stopped` so an EC2 power-cycle
+#   brings the admin site back by itself (see below).
 name: bookforge-admin
 
+# Restart policy lives in the PROD override, not the base compose, so local
+# docker-compose keeps the default (`no`) and dev containers don't resurrect
+# themselves on Docker Desktop launch.
+#
+# Why this is needed: none of admin-spa / book_admin / admin-api declared a
+# restart policy, so the 2026-08-07 cost-park power-cycle left admin-spa and
+# admin-api Exited for 43h while Caddy (started by user_data with
+# `--restart unless-stopped`) stayed up and proxied a dead upstream — the admin
+# site served errors with no container obviously "wrong" in `docker ps`.
+#
+# `unless-stopped` rather than `always`: a deliberate `docker stop` during a
+# cost-park must STAY stopped. Only an EC2/daemon restart revives them.
 services:
   admin-api:
+    restart: unless-stopped
     environment:
       JAVA_TOOL_OPTIONS: ${ADMIN_API_JAVA_OPTS:--Xmx384m -Xss512k}
       # Control-plane moved to ECS (Cloud Map) — was host.docker.internal:1810x (box).
@@ -21,7 +36,11 @@ services:
       BILLING_URL: http://billing.pmb.local:8102
       ORG_URL: http://org.pmb.local:8103
 
+  admin-spa:
+    restart: unless-stopped
+
   book_admin:
+    restart: unless-stopped
     environment:
       # Admin data (admin_users/audit) lives in the `bookforge_admin` DATABASE on the
       # shared APP DocumentDB cluster (MONGODB_URL), not a dedicated admin cluster —
