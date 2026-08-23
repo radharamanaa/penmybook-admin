@@ -40,7 +40,7 @@ async def test_aggregates_counts_slots_and_tasks():
         pending=5,
         processing=1,
     )
-    with patch.object(repo, "get_db", return_value=db):
+    with patch.object(repo, "get_app_db", return_value=db):
         out = await repo.get_status_counts()
 
     assert out["counts_by_status"] == {"completed": 3, "generating": 2}
@@ -52,7 +52,7 @@ async def test_aggregates_counts_slots_and_tasks():
 @pytest.mark.asyncio
 async def test_missing_slot_counter_defaults_to_zero():
     db = _db(group_rows=[], slot_doc=None, pending=0, processing=0)
-    with patch.object(repo, "get_db", return_value=db):
+    with patch.object(repo, "get_app_db", return_value=db):
         out = await repo.get_status_counts()
     assert out["active_generation_slots"] == 0
     assert out["counts_by_status"] == {}
@@ -65,6 +65,6 @@ async def test_group_rows_with_null_status_are_dropped():
         group_rows=[{"_id": None, "count": 9}, {"_id": "queued", "count": 1}],
         slot_doc={"count": 0}, pending=0, processing=0,
     )
-    with patch.object(repo, "get_db", return_value=db):
+    with patch.object(repo, "get_app_db", return_value=db):
         out = await repo.get_status_counts()
     assert out["counts_by_status"] == {"queued": 1}

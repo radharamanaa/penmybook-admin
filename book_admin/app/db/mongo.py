@@ -1,9 +1,14 @@
 """MongoDB connection and client setup (async only — admin has no checkpointer).
 
-Primary client (`get_db`) serves admin_users / admin_audit_log / analytics.
-A SECOND Motor client (`get_feedback_db`) is pinned to the app DB
-(`APP_MONGODB_DB_NAME=bookforge`) with feedback-scoped creds — least privilege
-for feedback triage; never reuse `get_db()` for feedback reads.
+Primary client (`get_db`) serves admin_users / admin_audit_log on
+``MONGODB_DB_NAME`` (prod: ``bookforge_admin``). Operations reads of books /
+generation_tasks / active_generations go through ``get_app_db()`` — same
+primary URI, pinned to ``APP_MONGODB_DB_NAME`` (``bookforge``). That does
+**not** put ``admin_users`` on bookforge.
+
+A SECOND Motor client (`get_feedback_db`) is pinned to the app DB with
+feedback-scoped creds — least privilege for feedback triage. That user is
+DENIED on ``bookforge.books``; never reuse it for Operations counts.
 """
 
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -50,8 +55,18 @@ def get_feedback_motor_client() -> AsyncIOMotorClient:
     return feedback_client
 
 
+def get_app_db():
+    """App DB (`bookforge`) for books / generation_tasks / active_generations.
+
+    Primary admin URI (``MONGODB_URL``) pinned to ``APP_MONGODB_DB_NAME``.
+    Do **not** use the feedback-scoped client — that user cannot read books.
+    Do **not** put ``admin_users`` on bookforge — that stays on ``get_db()``.
+    """
+    return get_motor_client()[settings.APP_MONGODB_DB_NAME]
+
+
 def get_feedback_db():
-    """App DB (`bookforge`) via the feedback-scoped client — NOT ``get_db()``."""
+    """App DB (`bookforge`) via the feedback-scoped client — NOT ``get_app_db()``."""
     return get_feedback_motor_client()[settings.APP_MONGODB_DB_NAME]
 
 

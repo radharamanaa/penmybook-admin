@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api.js'
 
+const GENRE_LABELS = {
+  technical: 'Technical',
+  science_fiction: 'Science fiction',
+  literary_fiction: 'Literary fiction',
+  screenplay: 'Screenplay',
+  childrens: "Children's",
+  unknown: 'Unknown',
+}
+const GENRE_ORDER = Object.keys(GENRE_LABELS)
+const GENRE_N_MAX = 12
+
 const PERIODS = ['last_week', 'last_month', 'last_3_months', 'last_year']
 
 /**
@@ -50,6 +61,9 @@ export default function Analytics() {
   const [bookPage, setBookPage] = useState(1)
   const [chargesDegraded, setChargesDegraded] = useState(false)
   const [error, setError] = useState(null)
+  const [genreN, setGenreN] = useState(8)
+  const [genreCounts, setGenreCounts] = useState(null)
+  const [genreError, setGenreError] = useState(null)
 
   const load = useCallback(async () => {
     setError(null)
@@ -103,6 +117,20 @@ export default function Analytics() {
 
   useEffect(() => { load() }, [load])
 
+  const loadGenre = useCallback(async () => {
+    setGenreError(null)
+    try {
+      setGenreCounts(await api.analyticsGenreCounts(genreN))
+    } catch (err) {
+      setGenreCounts(null)
+      setGenreError(err.status === 504
+        ? 'Genre counts timed out (UTC windows). Retry, or lower n.'
+        : (err.message || 'Genre counts failed'))
+    }
+  }, [genreN])
+
+  useEffect(() => { loadGenre() }, [loadGenre])
+
   const pageCount = Math.max(1, Math.ceil(bookTotal / 20))
 
   return (
@@ -154,6 +182,86 @@ export default function Analytics() {
           </div>
         </div>
       )}
+
+      <div className="panel">
+        <h2 style={{ marginTop: 0 }}>Books by genre</h2>
+        <p className="sub">
+          UTC windows — today, this ISO week (Monday 00:00), last {genreN} weeks.
+          Started = created; finished = generation_finished_at only (no created_at fallback).
+          Independent of the COGS period picker.
+        </p>
+        <div className="row" style={{ marginBottom: 12 }}>
+          <div>
+            <label htmlFor="genre-n">Weeks (n)</label>
+            <select
+              id="genre-n"
+              value={genreN}
+              onChange={(e) => setGenreN(Number(e.target.value))}
+            >
+              {Array.from({ length: GENRE_N_MAX }, (_, i) => i + 1).map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {genreError && <div className="msg error">{genreError}</div>}
+        {genreCounts && (
+          <>
+            <p className="sub">
+              Legacy finished without a stamp: {genreCounts.legacy_finished_unreliable} (unreliable — not in the finished series).
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Genre</th>
+                  <th>Started today (UTC)</th>
+                  <th>Finished today (UTC)</th>
+                  <th>Started this week (UTC)</th>
+                  <th>Finished this week (UTC)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {GENRE_ORDER.map((g) => (
+                  <tr key={g}>
+                    <td>{GENRE_LABELS[g]}</td>
+                    <td>{genreCounts.today?.started?.[g] ?? 0}</td>
+                    <td>{genreCounts.today?.finished?.[g] ?? 0}</td>
+                    <td>{genreCounts.this_week?.started?.[g] ?? 0}</td>
+                    <td>{genreCounts.this_week?.finished?.[g] ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <h3>Last {genreCounts.n} ISO weeks (UTC Monday–Sunday)</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Week start (UTC)</th>
+                  {GENRE_ORDER.map((g) => (
+                    <th key={`s-${g}`}>{GENRE_LABELS[g]} started</th>
+                  ))}
+                  {GENRE_ORDER.map((g) => (
+                    <th key={`f-${g}`}>{GENRE_LABELS[g]} finished</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(genreCounts.weeks ?? []).map((w) => (
+                  <tr key={w.week_start}>
+                    <td className="mono">{w.week_start}</td>
+                    {GENRE_ORDER.map((g) => (
+                      <td key={`s-${w.week_start}-${g}`}>{w.started?.[g] ?? 0}</td>
+                    ))}
+                    {GENRE_ORDER.map((g) => (
+                      <td key={`f-${w.week_start}-${g}`}>{w.finished?.[g] ?? 0}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
 
       <div className="panel">
         <h2 style={{ marginTop: 0 }}>Per-book COGS vs charges</h2>

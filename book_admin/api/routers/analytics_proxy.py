@@ -20,7 +20,7 @@ from app.services.auth import AdminPrincipal, require_admin
 
 router = APIRouter()
 
-_ALLOWED = frozenset({"conversations", "books", "books/list", "live", "usage/lanes"})
+_ALLOWED = frozenset({"conversations", "books", "books/list", "live", "usage/lanes", "genre-counts"})
 
 # Paths carrying a dynamic trailing id segment (exact-match can't express them).
 # The suffix must be a single non-empty path segment — no '/' and no traversal.

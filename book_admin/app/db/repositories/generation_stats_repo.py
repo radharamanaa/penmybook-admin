@@ -7,13 +7,13 @@ these — it only reports them.
 
 from __future__ import annotations
 
-from app.db.mongo import get_db
+from app.db.mongo import get_app_db
 
 _ACTIVE_GENERATIONS_ID = "counter"
 
 
 async def get_status_counts() -> dict:
-    db = get_db()
+    db = get_app_db()
 
     rows = await db.books.aggregate(
         [{"$group": {"_id": "$status", "count": {"$sum": 1}}}]

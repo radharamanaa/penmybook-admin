@@ -178,6 +178,7 @@ export const api = {
     return request(`/py/admin/analytics/books/list?${qs}`)
   },
   analyticsLive: () => request('/py/admin/analytics/live'),
+  analyticsGenreCounts: (n = 8) => request(`/py/admin/analytics/genre-counts?n=${n}`),
 
   // ── feedback triage (book_admin → bookforge.feedback) ──
   feedbackList: ({ page = 1, limit = 20 } = {}) =>

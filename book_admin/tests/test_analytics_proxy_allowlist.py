@@ -22,6 +22,7 @@ _UUID = "11111111-2222-4333-8444-555555555555"
         "books/list",
         "live",
         "usage/lanes",
+        "genre-counts",
         f"usage/by-user/{_UUID}",
         f"usage/by-org/{_UUID}",
     ],
@@ -42,6 +43,9 @@ def test_allowed_paths(path: str) -> None:
         "usage/by-user/../../admin",     # traversal shape (multi-segment)
         "usage/by-team/abc",      # unknown usage sub-path
         "books/list/extra",
+        "genre-count",
+        "genre-counts/",
+        "genre-counts/extra",
     ],
 )
 def test_rejected_paths(path: str) -> None:
