@@ -27,9 +27,11 @@ import java.util.UUID;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.patchRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlMatching;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -206,6 +208,331 @@ public class PortalAdminSteps {
         params.put("refundAmountCents", refundAmountCents);
         String paramsHash = paramsHasher.compute("refund", staffUserId, TARGET_USER, params);
         return StepUpTokenMinter.validFor("refund", paramsHash);
+    }
+
+    // ───────── When — resolve a user's refund request ─────────
+
+    @When("they attempt to resolve a refund request approving {long} cents")
+    public void attemptResolveRefundRequest(long amountCents) {
+        lastResponse = resolveCall(UUID.randomUUID(), amountCents, amountCents, true);
+    }
+
+    @When("they resolve a refund request approving {long} cents")
+    public void resolveRefundRequest(long amountCents) {
+        lastResponse = resolveCall(UUID.randomUUID(), amountCents, amountCents, true);
+    }
+
+    @When("they resolve a refund request approving {long} cents without a step-up token")
+    public void resolveRefundRequestNoToken(long amountCents) {
+        lastResponse = resolveCall(UUID.randomUUID(), amountCents, amountCents, false);
+    }
+
+    @When("they resolve a refund request with a token bound to {long} cents but approve {long} cents")
+    public void resolveRefundRequestReplayedToken(long boundCents, long approvedCents) {
+        // The token authorises `boundCents`; the body asks for `approvedCents`. The server
+        // recomputes the paramsHash over the BODY, so the mismatch must be refused — otherwise a
+        // token minted to return $20 could be replayed to drain a wallet.
+        lastResponse = resolveCall(UUID.randomUUID(), boundCents, approvedCents, true);
+    }
+
+    private ResponseEntity<String> resolveCall(UUID requestId, long boundCents,
+                                               long bodyCents, boolean withToken) {
+        AdminWireMock.server().stubFor(post(urlMatching("/internal/refund-requests/.*/resolve"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"status\":\"APPROVED\",\"approvedAmountCents\":" + bodyCents
+                                + ",\"refundedCents\":" + bodyCents + ",\"residualCents\":0}")));
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("decision", "APPROVE");
+        body.put("amountCents", bodyCents);
+        body.put("note", "returned to your original card");
+
+        String stepUpToken = null;
+        if (callerIsAdmin && withToken) {
+        Map<String, Object> params = hashedResolveParams(requestId, "APPROVE", boundCents);
+        String paramsHash = paramsHasher.compute(
+                "resolve_refund_request", staffUserId, null, params);
+        stepUpToken = StepUpTokenMinter.validFor("resolve_refund_request", paramsHash);
+        }
+        return sendWithStepUp(HttpMethod.POST,
+                "/v1/admin/refund-requests/" + requestId + "/resolve", body, stepUpToken);
+    }
+
+    @When("they view the refund-request queue")
+    public void viewRefundRequestQueue() {
+        stubRefundQueueRow("USER", TARGET_USER);
+        lastResponse = send(HttpMethod.GET, "/v1/admin/refund-requests?status=PENDING&limit=50", null);
+    }
+
+    @When("they view the refund-request queue whose owner is known")
+    public void viewRefundRequestQueueOwnerKnown() {
+        stubRefundQueueRow("USER", TARGET_USER);
+        AdminWireMock.server().stubFor(post(urlMatching("/internal/admin/users/by-ids"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("[{\"userId\":\"" + TARGET_USER + "\","
+                                + "\"authorName\":\"Jane Q. Penwright\","
+                                + "\"email\":\"jane@example.com\"}]")));
+        lastResponse = send(HttpMethod.GET, "/v1/admin/refund-requests?status=PENDING&limit=50", null);
+    }
+
+    @When("they view the refund-request queue whose owner is an org")
+    public void viewRefundRequestQueueOrgOwner() {
+        UUID orgId = UUID.fromString("bbbbbbbb-0000-0000-0000-000000000001");
+        stubRefundQueueRow("ORG", orgId);
+        AdminWireMock.server().stubFor(get(urlPathEqualTo("/internal/orgs/" + orgId + "/identity"))
+                .atPriority(1)
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"orgId\":\"" + orgId + "\","
+                                + "\"name\":\"Acme Publishing\","
+                                + "\"authorName\":\"Acme Press\"}")));
+        lastResponse = send(HttpMethod.GET, "/v1/admin/refund-requests?status=PENDING&limit=50", null);
+    }
+
+    @When("they view the refund-request queue while identity lookup is down")
+    public void viewRefundRequestQueueIdentityDown() {
+        stubRefundQueueRow("USER", TARGET_USER);
+        AdminWireMock.server().stubFor(post(urlMatching("/internal/admin/users/by-ids"))
+                .willReturn(aResponse().withStatus(503)));
+        lastResponse = send(HttpMethod.GET, "/v1/admin/refund-requests?status=PENDING&limit=50", null);
+    }
+
+    private void stubRefundQueueRow(String ownerType, UUID ownerId) {
+        AdminWireMock.server().stubFor(get(urlMatching("/internal/refund-requests.*"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("[{\"id\":\"" + UUID.randomUUID() + "\",\"ownerType\":\"" + ownerType + "\","
+                                + "\"ownerId\":\"" + ownerId + "\",\"status\":\"PENDING\","
+                                + "\"requestedAmountCents\":2000,\"reason\":\"duplicate charge\","
+                                + "\"snapshotRefundableCents\":10000,\"liveRefundableCents\":6000,"
+                                + "\"createdAt\":\"2026-08-25T10:00:00Z\","
+                                + "\"updatedAt\":\"2026-08-25T10:00:00Z\"}]")));
+    }
+
+    @When("they view the refund-request queue while billing is unavailable")
+    public void viewRefundRequestQueueBillingDown() {
+        AdminWireMock.server().stubFor(get(urlMatching("/internal/refund-requests.*"))
+                .willReturn(aResponse().withStatus(503)));
+        lastResponse = send(HttpMethod.GET, "/v1/admin/refund-requests?status=PENDING&limit=50", null);
+    }
+
+    @When("they reject a refund request")
+    public void rejectRefundRequest() {
+        UUID requestId = UUID.randomUUID();
+        AdminWireMock.server().stubFor(post(urlMatching("/internal/refund-requests/.*/resolve"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"status\":\"REJECTED\",\"refundedCents\":0,\"residualCents\":0}")));
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("decision", "REJECT");
+        body.put("amountCents", null);
+        body.put("note", "outside the refund window");
+
+        Map<String, Object> params = hashedResolveParams(requestId, "REJECT", null);
+        String paramsHash = paramsHasher.compute("resolve_refund_request", staffUserId, null, params);
+        String token = StepUpTokenMinter.validFor("resolve_refund_request", paramsHash);
+
+        lastResponse = sendWithStepUp(HttpMethod.POST,
+                "/v1/admin/refund-requests/" + requestId + "/resolve", body, token);
+    }
+
+    private Map<String, Object> hashedResolveParams(UUID requestId, String decision, Long amountCents) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("requestId", requestId.toString());
+        params.put("decision", decision);
+        params.put("amountCents", amountCents);
+        return params;
+    }
+
+    @When("they start an OTP challenge to resolve a refund request")
+    public void startResolveRefundRequestOtp() {
+        Map<String, Object> params = hashedResolveParams(UUID.randomUUID(), "APPROVE", 2000L);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("action", "resolve_refund_request");
+        body.put("targetUserId", null);
+        body.put("params", params);
+        lastResponse = send(HttpMethod.POST, "/v1/admin/otp/start", body);
+    }
+
+    @When("they resolve a refund request but billing does not confirm")
+    public void resolveWhenBillingDoesNotConfirm() {
+        UUID requestId = UUID.randomUUID();
+        AdminWireMock.server().stubFor(post(urlMatching("/internal/refund-requests/.*/resolve"))
+                .willReturn(aResponse().withStatus(503)));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("decision", "APPROVE");
+        body.put("amountCents", 2000);
+        body.put("note", "returned to your original card");
+        String paramsHash = paramsHasher.compute(
+                "resolve_refund_request", staffUserId, null,
+                hashedResolveParams(requestId, "APPROVE", 2000L));
+        String token = StepUpTokenMinter.validFor("resolve_refund_request", paramsHash);
+        lastResponse = sendWithStepUp(HttpMethod.POST,
+                "/v1/admin/refund-requests/" + requestId + "/resolve", body, token);
+    }
+
+    @When("they view the refund-request queue filtered to {string}")
+    public void viewRefundRequestQueueFiltered(String status) {
+        lastResponse = send(HttpMethod.GET, "/v1/admin/refund-requests?status=" + status + "&limit=50", null);
+    }
+
+    @When("they view the residual queue")
+    public void viewResidualQueue() {
+        lastResponse = send(HttpMethod.GET, "/v1/admin/refund-residuals", null);
+    }
+
+    @When("they view the residual queue while billing is unavailable")
+    public void viewResidualQueueBillingDown() {
+        AdminWireMock.server().stubFor(get(urlPathEqualTo("/internal/refund-residuals"))
+                .willReturn(aResponse().withStatus(503)));
+        lastResponse = send(HttpMethod.GET, "/v1/admin/refund-residuals", null);
+    }
+
+    @When("they settle a residual")
+    public void settleResidual() {
+        settleResidualCall(true);
+    }
+
+    @When("they settle a residual that billing already resolved")
+    public void settleResidualAlreadyResolved() {
+        settleResidualCall(false);
+    }
+
+    private void settleResidualCall(boolean freshlySettled) {
+        UUID residualId = UUID.randomUUID();
+        AdminWireMock.server().stubFor(post(urlPathEqualTo("/internal/refund-residuals/settle"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"settled\":" + freshlySettled + ",\"residualId\":\""
+                                + residualId + "\"}")));
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("residualId", residualId.toString());
+        String paramsHash = paramsHasher.compute(
+                "settle_refund_residual", staffUserId, null, params);
+        String token = StepUpTokenMinter.validFor("settle_refund_residual", paramsHash);
+        lastResponse = sendWithStepUp(HttpMethod.POST,
+                "/v1/admin/refund-residuals/" + residualId + "/settle", Map.of(), token);
+    }
+
+    @When("they start an OTP challenge to settle a residual")
+    public void startSettleResidualOtp() {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("residualId", UUID.randomUUID().toString());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("action", "settle_refund_residual");
+        body.put("targetUserId", null);
+        body.put("params", params);
+        lastResponse = send(HttpMethod.POST, "/v1/admin/otp/start", body);
+    }
+
+    @Then("the residual queue is not degraded")
+    public void residualQueueNotDegraded() {
+        JsonNode body = parseBody();
+        assertThat(body.path("degraded").asBoolean()).isFalse();
+        assertThat(body.path("residuals").isArray()).isTrue();
+    }
+
+    @Then("the residual queue is marked degraded rather than empty-and-fine")
+    public void residualQueueMarkedDegraded() {
+        JsonNode body = parseBody();
+        assertThat(body.path("degraded").asBoolean()).isTrue();
+        assertThat(body.path("residuals").isArray()).isTrue();
+        assertThat(body.path("residuals")).isEmpty();
+    }
+
+    @Then("the queue shows both the quoted and the live refundable amount")
+    public void queueShowsBothFigures() {
+        JsonNode body = parseBody();
+        assertThat(body.path("degraded").asBoolean()).isFalse();
+        assertThat(body.path("identityDegraded").asBoolean()).isFalse();
+        JsonNode row = body.path("requests").get(0);
+        // Staff must see BOTH: the wallet stays spendable while a request waits, so approving
+        // against the quoted figure would have billing silently reduce it.
+        assertThat(row.path("snapshotRefundableCents").asLong()).isEqualTo(10000L);
+        assertThat(row.path("liveRefundableCents").asLong()).isEqualTo(6000L);
+        // ...and whose wallet it is, or the admin is deciding blind.
+        assertThat(row.path("ownerId").asText()).isNotEmpty();
+        assertThat(row.path("ownerType").asText()).isEqualTo("USER");
+    }
+
+    @Then("the queue names the owner")
+    public void queueNamesTheOwner() {
+        JsonNode body = parseBody();
+        assertThat(body.path("degraded").asBoolean()).isFalse();
+        assertThat(body.path("identityDegraded").asBoolean()).isFalse();
+        JsonNode row = body.path("requests").get(0);
+        assertThat(row.path("ownerName").asText()).isEqualTo("Jane Q. Penwright");
+        assertThat(row.path("ownerEmail").asText()).isEqualTo("jane@example.com");
+        assertThat(row.path("ownerId").asText()).isEqualTo(TARGET_USER.toString());
+    }
+
+    @Then("the queue names the org owner")
+    public void queueNamesTheOrgOwner() {
+        JsonNode body = parseBody();
+        assertThat(body.path("degraded").asBoolean()).isFalse();
+        assertThat(body.path("identityDegraded").asBoolean()).isFalse();
+        JsonNode row = body.path("requests").get(0);
+        assertThat(row.path("ownerType").asText()).isEqualTo("ORG");
+        assertThat(row.path("ownerName").asText()).isEqualTo("Acme Press");
+        assertThat(row.path("ownerId").asText()).isEqualTo("bbbbbbbb-0000-0000-0000-000000000001");
+    }
+
+    @Then("the queue is marked identity-degraded with owner UUIDs still present")
+    public void queueIdentityDegraded() {
+        JsonNode body = parseBody();
+        assertThat(body.path("degraded").asBoolean()).isFalse();
+        assertThat(body.path("identityDegraded").asBoolean()).isTrue();
+        JsonNode row = body.path("requests").get(0);
+        assertThat(row.path("ownerId").asText()).isEqualTo(TARGET_USER.toString());
+        assertThat(row.path("ownerName").isMissingNode() || row.path("ownerName").isNull()).isTrue();
+    }
+
+    @Then("the queue is marked degraded rather than empty-and-fine")
+    public void queueMarkedDegraded() {
+        JsonNode body = parseBody();
+        assertThat(body.path("degraded").asBoolean()).isTrue();
+        assertThat(body.path("requests").isArray()).isTrue();
+        assertThat(body.path("requests")).isEmpty();
+    }
+
+    @Then("the receipt reports the amount billing actually refunded")
+    public void receiptReportsActualRefund() {
+        JsonNode body = parseBody();
+        assertThat(body.path("resolved").asBoolean()).isTrue();
+        assertThat(body.path("status").asText()).isEqualTo("APPROVED");
+        assertThat(body.path("refundedCents").asLong()).isEqualTo(2000L);
+    }
+
+    @Then("entitlements received OTP action {string}")
+    public void entitlementsReceivedOtpAction(String otpAction) {
+        AdminWireMock.server().verify(postRequestedFor(urlMatching("/internal/otp/start"))
+                .withRequestBody(matchingJsonPath("$.action",
+                        com.github.tomakehurst.wiremock.client.WireMock.equalTo(otpAction))));
+    }
+
+    @Then("entitlements received a residual-settle OTP bound only to the residual id")
+    public void entitlementsReceivedResidualSettleParams() {
+        AdminWireMock.server().verify(postRequestedFor(urlMatching("/internal/otp/start"))
+                .withRequestBody(matchingJsonPath("$.actionParams.residualId"))
+                .withRequestBody(matchingJsonPath("$[?(@.actionParams.targetUserId == null)]")));
+    }
+
+    @Then("the body tells the operator to refresh and check the status")
+    public void bodySaysRefreshNotRetry() {
+        JsonNode body = parseBody();
+        assertThat(body.path("code").asText()).isEqualTo("DOWNSTREAM_UNCONFIRMED");
+        assertThat(body.path("message").asText())
+                .contains("Refresh and check the status");
+        assertThat(body.path("message").asText().toLowerCase()).doesNotContain("retry");
     }
 
     // ───────── When — grant wallet money ─────────
@@ -445,6 +772,17 @@ public class PortalAdminSteps {
                 postRequestedFor(urlMatching("/internal/wallet/credit")));
     }
 
+    @And("the audit log has a DENY row for the attempted resolve")
+    public void auditDenyAttemptedResolve() {
+        // Unlike the 403 non-admin path, this is an admin whose OTP was spent and billing did
+        // not confirm. The DENY row must carry the logical action, not the HTTP path.
+        AdminWireMock.server().verify(postRequestedFor(urlMatching("/internal/audit-log"))
+                .withRequestBody(matchingJsonPath("$.decision",
+                        com.github.tomakehurst.wiremock.client.WireMock.equalTo("DENY")))
+                .withRequestBody(matchingJsonPath("$.action",
+                        com.github.tomakehurst.wiremock.client.WireMock.equalTo("REFUND_REQUEST_RESOLVE"))));
+    }
+
     @And("the audit log has a DENY row for action {string}")
     public void auditDeny(String action) {
         // SecurityConfig's AuditingAccessDeniedHandler writes a generic DENY row whose action is
@@ -575,6 +913,10 @@ public class PortalAdminSteps {
                     postRequestedFor(urlMatching("/internal/admin/waitlist-admit")));
             case "WAITLIST_CONFIG" -> AdminWireMock.server().verify(0,
                     postRequestedFor(urlPathMatching("/internal/admin/waitlist/config")));
+            case "REFUND_REQUEST_RESOLVE" -> AdminWireMock.server().verify(0,
+                    postRequestedFor(urlMatching("/internal/refund-requests/.*/resolve")));
+            case "REFUND_RESIDUAL_SETTLE" -> AdminWireMock.server().verify(0,
+                    postRequestedFor(urlPathEqualTo("/internal/refund-residuals/settle")));
             default -> {
                 // No-op — unknown action label means the assertion is informational only.
             }

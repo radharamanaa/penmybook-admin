@@ -1,5 +1,9 @@
 package dev.bookforge.adminapi.downstream;
 
+import dev.bookforge.adminapi.dto.RefundRequestQueueEntry;
+import dev.bookforge.adminapi.dto.RefundRequestQueueView;
+import dev.bookforge.adminapi.dto.RefundResidualEntry;
+import dev.bookforge.adminapi.dto.RefundResidualQueueView;
 import dev.bookforge.adminapi.dto.AccountStatusView;
 import dev.bookforge.adminapi.dto.AdminCommand;
 import dev.bookforge.adminapi.dto.GlobalWalletSummaryView;
@@ -179,6 +183,38 @@ public interface DownstreamClient {
      * money picture: balance, money-in, refunds split by kind (consume-refund vs card clawback).
      */
     WalletSummaryView walletSummary(String ownerType, UUID ownerId);
+
+    /**
+     * billing {@code GET /internal/refund-requests?status=&limit=} — the staff refund queue.
+     * A READ: no step-up, no audit row. Paginated because billing computes each row's live
+     * refundable balance, which costs a query per row.
+     *
+     * <p>Returns an envelope, never a bare list: an empty {@code requests} array is ambiguous
+     * between "queue is clear" and "billing did not answer". {@code degraded} is the latter.
+     */
+    RefundRequestQueueView listRefundRequests(String status, int limit);
+
+    /**
+     * billing {@code POST /internal/refund-requests/{id}/resolve} — approve or reject.
+     *
+     * <p>Step-up gated via {@code AdminService.resolveRefundRequest}. The ADMIN sets the final
+     * amount, and the token's paramsHash is bound over {requestId, decision, amountCents}, so a
+     * token authorised to return $20 cannot be replayed to return $500. {@code note} is sent
+     * downstream but is not in the hash — staff may edit the user-facing note after OTP start.
+     */
+    RefundRequestResolveResult resolveRefundRequest(AdminCommand command);
+
+    /**
+     * billing {@code GET /internal/refund-residuals} — unresolved residual rows, oldest first.
+     * Envelope, never a bare list: billing dark must not look like a clear queue.
+     */
+    RefundResidualQueueView listRefundResiduals();
+
+    /**
+     * billing {@code POST /internal/refund-residuals/settle} — wallet-credit one residual.
+     * Step-up gated via {@code AdminService.settleRefundResidual}. Params hash is {residualId}.
+     */
+    RefundResidualSettleResult settleRefundResidual(AdminCommand command);
 
     /** billing {@code GET /internal/admin/wallet/summary/global} — platform-wide money picture. */
     GlobalWalletSummaryView walletSummaryGlobal();

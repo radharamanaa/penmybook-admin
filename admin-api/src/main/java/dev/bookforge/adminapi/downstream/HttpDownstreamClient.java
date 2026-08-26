@@ -11,6 +11,10 @@ import dev.bookforge.adminapi.dto.OrgPricingRuleView;
 import dev.bookforge.adminapi.dto.OrgView;
 import dev.bookforge.adminapi.dto.PaymentHealthView;
 import dev.bookforge.adminapi.dto.PlatformAdminUpdateView;
+import dev.bookforge.adminapi.dto.RefundRequestQueueEntry;
+import dev.bookforge.adminapi.dto.RefundRequestQueueView;
+import dev.bookforge.adminapi.dto.RefundResidualEntry;
+import dev.bookforge.adminapi.dto.RefundResidualQueueView;
 import dev.bookforge.adminapi.dto.SpendActionEntry;
 import dev.bookforge.adminapi.dto.SpendByBookChargeView;
 import dev.bookforge.adminapi.dto.SpendByBooksResponse;
@@ -63,8 +67,19 @@ public class HttpDownstreamClient implements DownstreamClient {
     private static final Duration STEP_UP_RPC_TIMEOUT = Duration.ofSeconds(1);
     /** Phase-3b admin-portal calls use the 5-second budget mandated by the task spec. */
     private static final Duration ADMIN_RPC_TIMEOUT = Duration.ofSeconds(5);
+    /**
+     * Approve fans out one Paddle refund per payment (15s budget each). Three typical top-ups
+     * need ~30s; a 5s timeout here is the double-refund path (billing settles APPROVED, we
+     * DENY, the operator retries via POST /users/{id}/refund).
+     */
+    static final Duration REFUND_RESOLVE_TIMEOUT = Duration.ofSeconds(30);
     /** Per-book charges batch: tight budget; fail-soft on timeout so Analytics stays up. */
     private static final Duration BY_BOOKS_RPC_TIMEOUT = Duration.ofSeconds(2);
+    /**
+     * Identity enrichment for the refund queue. Concurrent with a 2s budget so billing's 5s
+     * plus names cannot exceed the SPA's 12s abort (serial 5+5+5 would).
+     */
+    static final Duration IDENTITY_RPC_TIMEOUT = Duration.ofSeconds(2);
     /** Circuit-breaker instance names — must match {@code application.yml}. */
     static final String CB_ENTITLEMENTS = "entitlements";
     static final String CB_BILLING = "billing";
@@ -188,10 +203,256 @@ public class HttpDownstreamClient implements DownstreamClient {
     }
 
     @Override
-    @CircuitBreaker(name = CB_BILLING)
+    @CircuitBreaker(name = CB_BILLING_REPORTS, fallbackMethod = "listRefundRequestsFallback")
+    public RefundRequestQueueView listRefundRequests(String status, int limit) {
+        String url = downstream.billingUrl() + "/internal/refund-requests?status="
+                + URLEncoder.encode(status, StandardCharsets.UTF_8) + "&limit=" + limit;
+        try {
+            JsonNode json = get(url, BILLING_AUD, ADMIN_RPC_TIMEOUT);
+            List<RefundRequestQueueEntry> rows = new ArrayList<>();
+            for (JsonNode n : json) {
+                rows.add(new RefundRequestQueueEntry(
+                        UUID.fromString(n.path("id").asText()),
+                        n.path("ownerType").asText(),
+                        UUID.fromString(n.path("ownerId").asText()),
+                        n.path("status").asText(),
+                        n.hasNonNull("requestedAmountCents")
+                                ? n.path("requestedAmountCents").asLong() : null,
+                        n.path("reason").asText(""),
+                        n.path("snapshotRefundableCents").asLong(0L),
+                        n.path("liveRefundableCents").asLong(0L),
+                        n.hasNonNull("approvedAmountCents")
+                                ? n.path("approvedAmountCents").asLong() : null,
+                        n.hasNonNull("refundedCents") ? n.path("refundedCents").asLong() : null,
+                        n.hasNonNull("residualCents") ? n.path("residualCents").asLong() : null,
+                        n.path("resolutionNote").asText(null),
+                        parseInstant(n.path("createdAt").asText(null)),
+                        parseInstant(n.path("updatedAt").asText(null)),
+                        null,
+                        null));
+            }
+            return enrichIdentities(new RefundRequestQueueView(false, false, status, rows));
+        } catch (DownstreamCallException e) {
+            log.warn("refund-request queue unavailable: {}", e.getMessage());
+            return new RefundRequestQueueView(true, false, status, List.of());
+        }
+    }
+
+    /** Open-breaker / unexpected failure: same envelope as a billing outage, never a 500. */
+    public RefundRequestQueueView listRefundRequestsFallback(String status, int limit, Throwable t) {
+        log.warn("refund-request queue short-circuited: {}", t.toString());
+        return new RefundRequestQueueView(true, false, status, List.of());
+    }
+
+    private static Instant parseInstant(String raw) {
+        return raw == null || raw.isBlank() ? null : Instant.parse(raw);
+    }
+
+    /**
+     * Attaches author names / emails without N+1'ing billing. A failure here is
+     * {@code identityDegraded}, never {@code degraded} — the money figures are still trustworthy.
+     */
+    private RefundRequestQueueView enrichIdentities(RefundRequestQueueView view) {
+        if (view.degraded() || view.requests().isEmpty()) {
+            return view;
+        }
+        List<UUID> userIds = view.requests().stream()
+                .filter(r -> "USER".equals(r.ownerType()))
+                .map(RefundRequestQueueEntry::ownerId)
+                .distinct()
+                .toList();
+        List<UUID> orgIds = view.requests().stream()
+                .filter(r -> "ORG".equals(r.ownerType()))
+                .map(RefundRequestQueueEntry::ownerId)
+                .distinct()
+                .toList();
+
+        java.util.concurrent.atomic.AtomicBoolean identityDegraded =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        Map<UUID, JsonNode> users = Map.of();
+        Map<UUID, JsonNode> orgs = new java.util.concurrent.ConcurrentHashMap<>();
+
+        try (var exec = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var usersF = userIds.isEmpty()
+                    ? java.util.concurrent.CompletableFuture.completedFuture(Map.<UUID, JsonNode>of())
+                    : java.util.concurrent.CompletableFuture.supplyAsync(
+                            () -> fetchUserIdentities(userIds), exec);
+            List<java.util.concurrent.CompletableFuture<Void>> orgFs = orgIds.stream()
+                    .map(id -> java.util.concurrent.CompletableFuture.runAsync(() -> {
+                        try {
+                            JsonNode n = get(downstream.orgUrl() + "/internal/orgs/" + id + "/identity",
+                                    ORG_AUD, IDENTITY_RPC_TIMEOUT);
+                            orgs.put(id, n);
+                        } catch (DownstreamCallException e) {
+                            if (!isNotFound(e)) {
+                                throw e;
+                            }
+                        }
+                    }, exec))
+                    .toList();
+            try {
+                users = usersF.get(IDENTITY_RPC_TIMEOUT.toMillis() + 250,
+                        java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (Exception e) {
+                identityDegraded.set(true);
+                log.warn("refund-queue user identity unavailable: {}", e.toString());
+            }
+            if (!orgFs.isEmpty()) {
+                try {
+                    java.util.concurrent.CompletableFuture
+                            .allOf(orgFs.toArray(java.util.concurrent.CompletableFuture[]::new))
+                            .get(IDENTITY_RPC_TIMEOUT.toMillis() + 250,
+                                    java.util.concurrent.TimeUnit.MILLISECONDS);
+                } catch (Exception e) {
+                    identityDegraded.set(true);
+                    log.warn("refund-queue org identity unavailable: {}", e.toString());
+                }
+            }
+        }
+
+        List<RefundRequestQueueEntry> enriched = new ArrayList<>();
+        for (RefundRequestQueueEntry row : view.requests()) {
+            String ownerName = null;
+            String ownerEmail = null;
+            if ("USER".equals(row.ownerType())) {
+                JsonNode n = users.get(row.ownerId());
+                if (n != null) {
+                    ownerName = textOrNull(n, "authorName");
+                    ownerEmail = textOrNull(n, "email");
+                }
+            } else if ("ORG".equals(row.ownerType())) {
+                JsonNode n = orgs.get(row.ownerId());
+                if (n != null) {
+                    String author = textOrNull(n, "authorName");
+                    ownerName = (author == null || author.isBlank())
+                            ? textOrNull(n, "name") : author;
+                }
+            }
+            enriched.add(new RefundRequestQueueEntry(
+                    row.id(), row.ownerType(), row.ownerId(), row.status(),
+                    row.requestedAmountCents(), row.reason(),
+                    row.snapshotRefundableCents(), row.liveRefundableCents(),
+                    row.approvedAmountCents(), row.refundedCents(), row.residualCents(),
+                    row.resolutionNote(), row.createdAt(), row.updatedAt(),
+                    ownerName, ownerEmail));
+        }
+        return new RefundRequestQueueView(false, identityDegraded.get(), view.status(), enriched);
+    }
+
+    private Map<UUID, JsonNode> fetchUserIdentities(List<UUID> userIds) {
+        String url = downstream.entitlementsUrl() + "/internal/admin/users/by-ids";
+        JsonNode json = send(url, ENTITLEMENTS_AUD, toJsonValue(userIds), IDENTITY_RPC_TIMEOUT);
+        Map<UUID, JsonNode> out = new LinkedHashMap<>();
+        for (JsonNode n : json) {
+            if (n.hasNonNull("userId")) {
+                out.put(UUID.fromString(n.path("userId").asText()), n);
+            }
+        }
+        return out;
+    }
+
+    private static boolean isNotFound(DownstreamCallException e) {
+        String msg = e.getMessage();
+        return msg != null && msg.contains("HTTP 404");
+    }
+
+    @Override
+    @CircuitBreaker(name = CB_BILLING, fallbackMethod = "resolveRefundRequestFallback")
+    public RefundRequestResolveResult resolveRefundRequest(AdminCommand command) {
+        // The ADMIN's figure is authoritative; billing clamps it to live refundable so a typo can
+        // never return bonus credit — or money never paid — to a card.
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("decision", command.params().get("decision"));
+        body.put("amountCents", command.params().get("amountCents"));
+        body.put("note", command.params().get("note"));
+        body.put("staffUserId", command.staffUserId().toString());
+        // One OTP challenge = one resolve operation, reused verbatim on a retry — the same
+        // stable-key contract the refund path uses. A fresh UUID per call would defeat billing's
+        // claim guard on a retry.
+        body.put("stepUpChallengeId", challengeIdOf(command.stepUpToken()));
+        String url = downstream.billingUrl() + "/internal/refund-requests/"
+                + command.params().get("requestId") + "/resolve";
+        try {
+            JsonNode json = send(url, BILLING_AUD, toJson(body), REFUND_RESOLVE_TIMEOUT);
+            return new RefundRequestResolveResult(
+                    true,
+                    json.path("status").asText(null),
+                    json.hasNonNull("approvedAmountCents")
+                            ? json.path("approvedAmountCents").asLong() : null,
+                    json.path("refundedCents").asLong(0L),
+                    json.path("residualCents").asLong(0L));
+        } catch (DownstreamCallException e) {
+            return RefundRequestResolveResult.failed();
+        }
+    }
+
+    public RefundRequestResolveResult resolveRefundRequestFallback(AdminCommand command, Throwable t) {
+        log.warn("resolveRefundRequest short-circuited: {}", t.toString());
+        return RefundRequestResolveResult.failed();
+    }
+
+    @Override
+    @CircuitBreaker(name = CB_BILLING_REPORTS, fallbackMethod = "listRefundResidualsFallback")
+    public RefundResidualQueueView listRefundResiduals() {
+        String url = downstream.billingUrl() + "/internal/refund-residuals";
+        try {
+            JsonNode json = get(url, BILLING_AUD, ADMIN_RPC_TIMEOUT);
+            if (json == null || !json.isArray()) {
+                log.warn("refund-residual queue: expected a JSON array");
+                return new RefundResidualQueueView(true, List.of());
+            }
+            List<RefundResidualEntry> rows = new ArrayList<>();
+            for (JsonNode n : json) {
+                rows.add(new RefundResidualEntry(
+                        UUID.fromString(n.path("id").asText()),
+                        n.path("ownerType").asText(),
+                        UUID.fromString(n.path("ownerId").asText()),
+                        n.hasNonNull("paymentId") ? UUID.fromString(n.path("paymentId").asText()) : null,
+                        n.path("paddleTransactionId").asText(null),
+                        n.path("amountCents").asLong(0L),
+                        n.path("reason").asText(""),
+                        parseInstant(n.path("createdAt").asText(null))));
+            }
+            return new RefundResidualQueueView(false, rows);
+        } catch (DownstreamCallException e) {
+            log.warn("refund-residual queue unavailable: {}", e.getMessage());
+            return new RefundResidualQueueView(true, List.of());
+        }
+    }
+
+    public RefundResidualQueueView listRefundResidualsFallback(Throwable t) {
+        log.warn("refund-residual queue short-circuited: {}", t.toString());
+        return new RefundResidualQueueView(true, List.of());
+    }
+
+    @Override
+    @CircuitBreaker(name = CB_BILLING, fallbackMethod = "settleRefundResidualFallback")
+    public RefundResidualSettleResult settleRefundResidual(AdminCommand command) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("residualId", command.params().get("residualId"));
+        body.put("staffUserId", command.staffUserId().toString());
+        // Full token: settling a residual mints wallet credit, so billing gates it exactly like a refund.
+        body.put("stepUpToken", command.stepUpToken());
+        String url = downstream.billingUrl() + "/internal/refund-residuals/settle";
+        try {
+            send(url, BILLING_AUD, toJson(body), ADMIN_RPC_TIMEOUT);
+            return new RefundResidualSettleResult(true);
+        } catch (DownstreamCallException e) {
+            return RefundResidualSettleResult.failed();
+        }
+    }
+
+    public RefundResidualSettleResult settleRefundResidualFallback(AdminCommand command, Throwable t) {
+        log.warn("settleRefundResidual short-circuited: {}", t.toString());
+        return RefundResidualSettleResult.failed();
+    }
+
+    @Override
+    @CircuitBreaker(name = CB_BILLING, fallbackMethod = "refundFallback")
     public DownstreamResult refund(AdminCommand command) {
-        // billing POST /internal/refund (D6 / P11). The body carries the OTP challenge UUID (not the
-        // full step-up token — B4 fix) and a per-operation idempotencyKey so a retry of THIS refund
+        // billing POST /internal/refund (D6 / P11). The body carries the FULL step-up token — billing
+        // verifies and spends the approval itself rather than trusting a caller-named challenge id,
+        // which any mesh caller could invent. Plus a per-operation idempotencyKey so a retry of THIS refund
         // never double-debits the wallet. The 200 body reports BOTH the clamped ask
         // (requestedCents) and what was actually pulled back (walletDebitedCents) so the admin sees
         // "asked X, refunded Y" (F1 / D). A non-2xx (or transport fault) maps to success=false so
@@ -199,7 +460,7 @@ public class HttpDownstreamClient implements DownstreamClient {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("paymentId", command.params().get("paymentId"));
         body.put("refundAmountCents", command.params().get("refundAmountCents"));
-        body.put("stepUpChallengeId", challengeIdOf(command.stepUpToken()));
+        body.put("stepUpToken", command.stepUpToken());
         body.put("staffUserId", command.staffUserId().toString());
         // H2 fix — the idempotencyKey MUST be STABLE across retries of the SAME refund operation
         // (RefundRequest contract: "the saga reuses the original challenge id on retry"). The prior
@@ -230,6 +491,11 @@ public class HttpDownstreamClient implements DownstreamClient {
         } catch (DownstreamCallException e) {
             return new DownstreamResult(false, null, null);
         }
+    }
+
+    public DownstreamResult refundFallback(AdminCommand command, Throwable t) {
+        log.warn("refund short-circuited: {}", t.toString());
+        return new DownstreamResult(false, null, null);
     }
 
     @Override
@@ -690,6 +956,10 @@ public class HttpDownstreamClient implements DownstreamClient {
     }
 
     private String toJson(Map<String, Object> body) {
+        return toJsonValue(body);
+    }
+
+    private String toJsonValue(Object body) {
         try {
             return objectMapper.writeValueAsString(body);
         } catch (Exception e) {

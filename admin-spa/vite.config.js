@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 // Dev proxies mirror the production nginx routes (admin/admin-spa/nginx.conf):
@@ -20,5 +20,13 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },
+  },
+  // `css: false` because this SPA has ONE global stylesheet and no CSS modules —
+  // parsing it per test buys nothing.
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.js',
+    css: false,
   },
 })

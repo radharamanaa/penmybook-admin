@@ -78,6 +78,9 @@ export default function App() {
         <NavLink to="/analytics">Analytics</NavLink>
         <NavLink to="/feedback">Feedback</NavLink>
         <NavLink to="/spend">Spend</NavLink>
+        {import.meta.env.VITE_ENABLE_REFUND_QUEUE === 'true' && (
+          <NavLink to="/refund-requests">Refund requests</NavLink>
+        )}
         <div className="group">Configure</div>
         {CONFIG_SECTIONS.map((s) => (
           <NavLink key={s.key} to={`/config/${s.key}`}>{s.label}</NavLink>

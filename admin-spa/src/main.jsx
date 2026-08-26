@@ -15,7 +15,10 @@ import Spend from './screens/Spend.jsx'
 import AdminAccounts from './screens/AdminAccounts.jsx'
 import Audit from './screens/Audit.jsx'
 import SystemView from './screens/SystemView.jsx'
+import RefundRequests from './screens/RefundRequests.jsx'
 import './styles.css'
+
+const REFUND_QUEUE_ENABLED = import.meta.env.VITE_ENABLE_REFUND_QUEUE === 'true'
 
 const router = createBrowserRouter([
   {
@@ -29,6 +32,9 @@ const router = createBrowserRouter([
       { path: '/analytics', element: <Analytics /> },
       { path: '/feedback', element: <Feedback /> },
       { path: '/spend', element: <Spend /> },
+      ...(REFUND_QUEUE_ENABLED
+        ? [{ path: '/refund-requests', element: <RefundRequests /> }]
+        : []),
       { path: '/accounts', element: <AdminAccounts /> },
       { path: '/audit', element: <Audit /> },
       { path: '/system', element: <SystemView /> },

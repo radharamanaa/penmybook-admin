@@ -6,11 +6,14 @@ import dev.bookforge.adminapi.config.ServiceJwtProperties;
 import dev.bookforge.adminapi.downstream.DownstreamClient;
 import dev.bookforge.adminapi.downstream.DownstreamResult;
 import dev.bookforge.adminapi.downstream.HttpDownstreamClient;
+import dev.bookforge.adminapi.downstream.RefundRequestResolveResult;
+import dev.bookforge.adminapi.downstream.RefundResidualSettleResult;
 import dev.bookforge.adminapi.downstream.ServiceAccountTokenFactory;
 import dev.bookforge.adminapi.dto.AccountStatusView;
 import dev.bookforge.adminapi.dto.AdminActionResult;
 import dev.bookforge.adminapi.dto.AdminCommand;
 import dev.bookforge.adminapi.dto.OrgView;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import dev.bookforge.adminapi.security.AdminParamsHasher;
 import dev.bookforge.adminapi.security.InMemoryStepUpTokenStore;
 import dev.bookforge.adminapi.security.StepUpTokenStore;
@@ -19,8 +22,11 @@ import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Audited admin operations. Every write:
@@ -50,6 +56,8 @@ public class AdminService {
     private static final String UNSUSPEND = "unsuspend";
     private static final String FLAG_DEVELOPER = "flag_developer";
     private static final String REFUND = "refund";
+    private static final String RESOLVE_REFUND_REQUEST = "resolve_refund_request";
+    private static final String SETTLE_REFUND_RESIDUAL = "settle_refund_residual";
     private static final String WALLET_TOP_UP = "wallet_top_up";
 
     private static final String REJECT_STEP_UP_REQUIRED = "step_up_required";
@@ -134,6 +142,97 @@ public class AdminService {
      * carries the clamped ask + what was actually debited so the controller can return
      * "asked X, refunded Y" (D / F1).
      */
+    /**
+     * Approve or reject a user-submitted refund request. Step-up gated like every other money
+     * action: the token's paramsHash is bound over {requestId, decision, amountCents}, so a token
+     * authorised to return $20 cannot be replayed to return $500. {@code note} is sent to billing
+     * but is not in the hash — it is user-facing copy staff may edit after OTP start.
+     *
+     * <p>The gate applies to a REJECT too. It moves no money, but it is a decision the user is
+     * told about verbatim, and it closes their only open request — so it deserves the same
+     * attribution as an approval.
+     *
+     * <p>Hand-rolled beside {@link #refund} rather than through {@link #runWrite}: billing's
+     * outcome (status, refunded, residual) must reach the audit row and the SPA, and
+     * {@link AdminActionResult} is shared by four other writes that do not carry those fields.
+     */
+    public ResolveRefundOutcome resolveRefundRequest(AdminCommand command) {
+        Map<String, Object> hashed = new LinkedHashMap<>(command.params());
+        hashed.remove("note");
+        StepUpVerifier.Result gate = gate(RESOLVE_REFUND_REQUEST, command, hashed);
+        if (gate instanceof StepUpVerifier.Result.Missing) {
+            return ResolveRefundOutcome.rejected(REJECT_STEP_UP_REQUIRED);
+        }
+        if (!(gate instanceof StepUpVerifier.Result.Valid)) {
+            return ResolveRefundOutcome.rejected(REJECT_STEP_UP_INVALID);
+        }
+        RefundRequestResolveResult result = callDownstream(
+                () -> downstream.resolveRefundRequest(command),
+                RefundRequestResolveResult::failed);
+        if (!result.success()) {
+            return ResolveRefundOutcome.downstreamRejected();
+        }
+        return ResolveRefundOutcome.success(result.status(), result.approvedAmountCents(),
+                result.refundedCents(), result.residualCents());
+    }
+
+    public SettleResidualOutcome settleRefundResidual(AdminCommand command) {
+        StepUpVerifier.Result gate = gate(SETTLE_REFUND_RESIDUAL, command);
+        if (gate instanceof StepUpVerifier.Result.Missing) {
+            return SettleResidualOutcome.rejected(REJECT_STEP_UP_REQUIRED);
+        }
+        if (!(gate instanceof StepUpVerifier.Result.Valid)) {
+            return SettleResidualOutcome.rejected(REJECT_STEP_UP_INVALID);
+        }
+        RefundResidualSettleResult result = callDownstream(
+                () -> downstream.settleRefundResidual(command),
+                RefundResidualSettleResult::failed);
+        if (!result.success()) {
+            return SettleResidualOutcome.downstreamRejected();
+        }
+        return SettleResidualOutcome.ok();
+    }
+
+    public record SettleResidualOutcome(boolean success, String rejectionReason) {
+        static SettleResidualOutcome ok() {
+            return new SettleResidualOutcome(true, null);
+        }
+        static SettleResidualOutcome rejected(String reason) {
+            return new SettleResidualOutcome(false, reason);
+        }
+        static SettleResidualOutcome downstreamRejected() {
+            return new SettleResidualOutcome(false, null);
+        }
+    }
+
+    /**
+     * Outcome of a step-up-gated refund-request resolve. On success carries billing's figures so
+     * the audit row records what actually moved, not the ask. A {@code null} rejectionReason
+     * after failure means billing did not confirm — 502, never a retry.
+     */
+    public record ResolveRefundOutcome(
+            boolean success,
+            String status,
+            Long approvedAmountCents,
+            long refundedCents,
+            long residualCents,
+            String rejectionReason) {
+
+        static ResolveRefundOutcome success(String status, Long approvedAmountCents,
+                                            long refundedCents, long residualCents) {
+            return new ResolveRefundOutcome(true, status, approvedAmountCents, refundedCents,
+                    residualCents, null);
+        }
+
+        static ResolveRefundOutcome rejected(String reason) {
+            return new ResolveRefundOutcome(false, null, null, 0L, 0L, reason);
+        }
+
+        static ResolveRefundOutcome downstreamRejected() {
+            return new ResolveRefundOutcome(false, null, null, 0L, 0L, null);
+        }
+    }
+
     public RefundOutcome refund(AdminCommand command) {
         StepUpVerifier.Result gate = gate(REFUND, command);
         if (gate instanceof StepUpVerifier.Result.Missing) {
@@ -142,7 +241,9 @@ public class AdminService {
         if (!(gate instanceof StepUpVerifier.Result.Valid)) {
             return RefundOutcome.rejected(REJECT_STEP_UP_INVALID);
         }
-        DownstreamResult result = downstream.refund(command);
+        DownstreamResult result = callDownstream(
+                () -> downstream.refund(command),
+                () -> new DownstreamResult(false, null, null));
         if (!result.success()) {
             return RefundOutcome.downstreamRejected();
         }
@@ -197,9 +298,13 @@ public class AdminService {
         if (!(gate instanceof StepUpVerifier.Result.Valid)) {
             return WalletTopUpOutcome.rejected(REJECT_STEP_UP_INVALID);
         }
-        long balanceCents = downstream.walletTopUp(command.targetUserId(), amountCents, reason)
-                .balanceCents();
-        return WalletTopUpOutcome.success(balanceCents);
+        try {
+            long balanceCents = downstream.walletTopUp(command.targetUserId(), amountCents, reason)
+                    .balanceCents();
+            return WalletTopUpOutcome.success(balanceCents);
+        } catch (CallNotPermittedException e) {
+            return WalletTopUpOutcome.rejected(null);
+        }
     }
 
     /**
@@ -238,7 +343,9 @@ public class AdminService {
             return new AdminActionResult(false, null, REJECT_STEP_UP_INVALID);
         }
 
-        DownstreamResult result = downstreamCall.apply(command);
+        DownstreamResult result = callDownstream(
+                () -> downstreamCall.apply(command),
+                () -> new DownstreamResult(false, null, null));
         if (!result.success()) {
             // Downstream rolled back (e.g. audit insert failed in the same transaction).
             return new AdminActionResult(false, null, null);
@@ -260,6 +367,11 @@ public class AdminService {
      * No downstream call is issued until this returns {@code Valid}.
      */
     private StepUpVerifier.Result gate(String action, AdminCommand command) {
+        return gate(action, command, command.params());
+    }
+
+    private StepUpVerifier.Result gate(String action, AdminCommand command,
+                                       Map<String, Object> hashParams) {
         StepUpVerifier.Result outcome = stepUpVerifier.verify(command.stepUpToken(), action);
         if (!(outcome instanceof StepUpVerifier.Result.Valid valid)) {
             return outcome;
@@ -269,7 +381,7 @@ public class AdminService {
         // command's params. Constant-time compare so a forgery cannot use response timing to
         // probe the expected hash byte-by-byte.
         String expectedParamsHash = paramsHasher.compute(
-                action, command.staffUserId(), command.targetUserId(), command.params());
+                action, command.staffUserId(), command.targetUserId(), hashParams);
         if (!constantTimeEquals(expectedParamsHash, valid.paramsHash())) {
             return new StepUpVerifier.Result.Invalid();
         }
@@ -281,6 +393,18 @@ public class AdminService {
             return new StepUpVerifier.Result.Invalid();
         }
         return valid;
+    }
+
+    /**
+     * An open money-path breaker must not escape as a 500 after the OTP is already spent.
+     * Map it to the same downstream-rejected outcome the timeout path uses (502 + DENY audit).
+     */
+    private static <T> T callDownstream(Supplier<T> call, Supplier<T> onOpenBreaker) {
+        try {
+            return call.get();
+        } catch (CallNotPermittedException e) {
+            return onOpenBreaker.get();
+        }
     }
 
     private static boolean constantTimeEquals(String expected, String actual) {

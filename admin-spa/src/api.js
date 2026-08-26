@@ -35,11 +35,13 @@ class ApiError extends Error {
 // A hung backend must not freeze the console (the tool you use to fix incidents).
 const _REQUEST_TIMEOUT_MS = 12000
 
-async function request(path, { method = 'GET', body } = {}) {
-  const headers = { 'Content-Type': 'application/json' }
+async function request(path, { method = 'GET', body, headers: extraHeaders, timeoutMs } = {}) {
+  // Caller headers merge UNDER the defaults: a caller must never be able to blank
+  // Authorization or Content-Type by passing them through.
+  const headers = { ...(extraHeaders ?? {}), 'Content-Type': 'application/json' }
   if (_token) headers.Authorization = `Bearer ${_token}`
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), _REQUEST_TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), timeoutMs ?? _REQUEST_TIMEOUT_MS)
   let resp
   try {
     resp = await fetch(path, {
@@ -96,18 +98,10 @@ export const api = {
   searchUsers: (email, limit = 50) =>
     request(`/api/v1/admin/users/search?email=${encodeURIComponent(email)}&limit=${limit}`),
   walletTopUp: (userId, amountCents, reason, stepUpToken) =>
-    fetch(`/api/v1/admin/users/${userId}/wallet/top-up`, {
+    request(`/api/v1/admin/users/${userId}/wallet/top-up`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${_token}`,
-        'X-Step-Up-Token': stepUpToken,
-      },
-      body: JSON.stringify({ amountCents, reason }),
-    }).then(async (r) => {
-      const j = await r.json().catch(() => null)
-      if (!r.ok) throw new ApiError(r.status, j)
-      return j
+      body: { amountCents, reason },
+      headers: { 'X-Step-Up-Token': stepUpToken },
     }),
   setPlatformAdmin: (userId, isPlatformAdmin) =>
     request(`/api/v1/admin/users/${userId}`, { method: 'PATCH', body: { isPlatformAdmin } }),
@@ -118,32 +112,35 @@ export const api = {
       method: 'POST', body: { challengeId, code, action, targetUserId, params },
     }),
   grantCredits: (userId, amountCents, stepUpToken) =>
-    fetch(`/api/v1/admin/users/${userId}/grant-credits`, {
+    request(`/api/v1/admin/users/${userId}/grant-credits`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${_token}`,
-        'X-Step-Up-Token': stepUpToken,
-      },
-      body: JSON.stringify({ amountCents }),
-    }).then(async (r) => {
-      const j = await r.json().catch(() => null)
-      if (!r.ok) throw new ApiError(r.status, j)
-      return j
+      body: { amountCents },
+      headers: { 'X-Step-Up-Token': stepUpToken },
     }),
   refund: (userId, paymentId, amountCents, reason, stepUpToken) =>
-    fetch(`/api/v1/admin/users/${userId}/refund`, {
+    request(`/api/v1/admin/users/${userId}/refund`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${_token}`,
-        'X-Step-Up-Token': stepUpToken,
-      },
-      body: JSON.stringify({ paymentId, amountCents, reason }),
-    }).then(async (r) => {
-      const j = await r.json().catch(() => null)
-      if (!r.ok) throw new ApiError(r.status, j)
-      return j
+      body: { paymentId, amountCents, reason },
+      headers: { 'X-Step-Up-Token': stepUpToken },
+    }),
+
+  // ── refund-request queue (admin-api → billing). Resolve owns a 35s budget because
+  // billing fans out one 15s Paddle refund per payment; the default 12s abort would
+  // fire while money is still moving and look like a failed refund.
+  refundRequestQueue: (status = 'PENDING', limit = 50) =>
+    request(`/api/v1/admin/refund-requests?status=${encodeURIComponent(status)}&limit=${limit}`),
+  resolveRefundRequest: (id, decision, amountCents, note, stepUpToken) =>
+    request(`/api/v1/admin/refund-requests/${id}/resolve`, {
+      method: 'POST',
+      body: { decision, amountCents, note },
+      headers: { 'X-Step-Up-Token': stepUpToken },
+      timeoutMs: 35_000,
+    }),
+  refundResiduals: () => request('/api/v1/admin/refund-residuals'),
+  settleRefundResidual: (id, stepUpToken) =>
+    request(`/api/v1/admin/refund-residuals/${id}/settle`, {
+      method: 'POST',
+      headers: { 'X-Step-Up-Token': stepUpToken },
     }),
   // ── pricing (admin-api → entitlements) ──
   getPricing: () => request('/api/v1/admin/pricing'),

@@ -69,8 +69,10 @@ public class AdminWireMock {
         // Phase 3b — admin-portal HTTP surface ↓
         stubBillingWalletCredit();
         stubBillingPaymentsHealth();
+        stubBillingRefundResiduals();
         stubEntitlementsSetPlatformAdmin();
         stubEntitlementsUserSearch();
+        stubEntitlementsUsersByIds();
         stubEntitlementsWaitlist();
         stubEntitlementsOrgPricingUpsert();
         stubEntitlementsAuditLog();
@@ -154,6 +156,23 @@ public class AdminWireMock {
                         .withBody("{\"balanceCents\":1500}")));
     }
 
+    /**
+     * billing residual queue. Empty array is a clear queue, not degraded. Settle HTTP 200 is
+     * success even when billing would report {@code settled=false} (already-resolved replay).
+     */
+    private static void stubBillingRefundResiduals() {
+        server.stubFor(get(urlPathEqualTo("/internal/refund-residuals"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("[]")));
+        server.stubFor(post(urlPathEqualTo("/internal/refund-residuals/settle"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"settled\":true,\"residualId\":\"" + UUID.randomUUID() + "\"}")));
+    }
+
     /** billing {@code GET /internal/admin/payments/health} — payment-integration health relay. */
     private static void stubBillingPaymentsHealth() {
         server.stubFor(get(urlPathEqualTo("/internal/admin/payments/health"))
@@ -185,6 +204,18 @@ public class AdminWireMock {
                         .withBody("[{\"userId\":\"" + UUID.randomUUID() + "\","
                                 + "\"email\":\"target@example.com\",\"accountStatus\":\"WAITLISTED\","
                                 + "\"isDeveloper\":false,\"createdAt\":\"2026-05-01T00:00:00Z\"}]")));
+    }
+
+    /**
+     * entitlements {@code POST /internal/admin/users/by-ids} — empty success so a queue read
+     * without names is identity-fine, not identity-degraded. Scenarios that need names override.
+     */
+    private static void stubEntitlementsUsersByIds() {
+        server.stubFor(post(urlPathEqualTo("/internal/admin/users/by-ids"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("[]")));
     }
 
     /** entitlements waitlist endpoints: admit (admitted/reason/accountStatus) + config get/set (D11). */

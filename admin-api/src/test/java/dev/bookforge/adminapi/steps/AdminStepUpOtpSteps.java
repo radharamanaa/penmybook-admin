@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.matching;
 import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlMatching;
@@ -199,9 +200,13 @@ public class AdminStepUpOtpSteps {
 
     @And("the refund was sent to billing with an idempotency key")
     public void refundSentToBilling() {
+        // The FULL step-up token now crosses the wire, not just its challenge id: billing verifies
+        // and spends the approval itself rather than trusting a caller-named id. Asserting the
+        // token STARTS WITH this challenge id proves both that it was forwarded intact and that it
+        // is the token minted for this OTP — a bare id assertion could not tell those apart.
         AdminWireMock.server().verify(postRequestedFor(urlMatching("/internal/refund"))
-                .withRequestBody(matchingJsonPath("$.stepUpChallengeId",
-                        equalTo(challengeId.toString())))
+                .withRequestBody(matchingJsonPath("$.stepUpToken",
+                        matching(challengeId + "\\|refund\\|.*")))
                 .withRequestBody(matchingJsonPath("$.idempotencyKey"))
                 .withRequestBody(matchingJsonPath("$.paymentId",
                         equalTo(paymentId.toString()))));

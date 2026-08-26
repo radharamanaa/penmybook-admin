@@ -2,6 +2,7 @@ package dev.bookforge.adminapi.api;
 
 import dev.bookforge.adminapi.downstream.DownstreamClient;
 import dev.bookforge.adminapi.downstream.DownstreamResult;
+import dev.bookforge.adminapi.dto.ResolveRefundRequestBody;
 import dev.bookforge.adminapi.dto.WaitlistAdmitView;
 import dev.bookforge.adminapi.dto.WaitlistConfigView;
 import dev.bookforge.adminapi.dto.WaitlistEntryView;
@@ -82,6 +83,9 @@ public class AdminController {
     // ───────── Audit action labels (LOCKED — match V00X__create_audit_log.sql action enum) ─────────
     private static final String ACTION_WALLET_TOPUP = "WALLET_TOPUP";
     private static final String ACTION_REFUND = "REFUND";
+    /** audit_log.action is plain TEXT — a new action needs no migration. */
+    private static final String ACTION_REFUND_REQUEST_RESOLVE = "REFUND_REQUEST_RESOLVE";
+    private static final String ACTION_REFUND_RESIDUAL_SETTLE = "REFUND_RESIDUAL_SETTLE";
     private static final String ACTION_GRANT_CREDITS = "GRANT_CREDITS";
     private static final String ACTION_SET_PLATFORM_ADMIN = "SET_PLATFORM_ADMIN";
     private static final String ACTION_UPSERT_ORG_PRICING = "UPSERT_ORG_PRICING";
@@ -89,6 +93,8 @@ public class AdminController {
 
     private static final String RESOURCE_USER = "USER";
     private static final String RESOURCE_PAYMENT = "PAYMENT";
+    private static final String RESOURCE_REFUND_REQUEST = "REFUND_REQUEST";
+    private static final String RESOURCE_REFUND_RESIDUAL = "REFUND_RESIDUAL";
     private static final String RESOURCE_ORG = "ORG";
     private static final String RESOURCE_PRICING = "PRICING";
 
@@ -103,6 +109,10 @@ public class AdminController {
     private static final String STEP_UP_ACTION_GRANT_CREDIT = "grant_credit";
     /** Action name the step-up token must be bound to for a refund (B3). */
     private static final String STEP_UP_ACTION_REFUND = "refund";
+    /** Approving or rejecting a user-submitted refund request. */
+    private static final String STEP_UP_ACTION_RESOLVE_REFUND_REQUEST = "resolve_refund_request";
+    /** Wallet-credit a refund residual. Hash is {residualId} only. */
+    private static final String STEP_UP_ACTION_SETTLE_REFUND_RESIDUAL = "settle_refund_residual";
     /** Action name the step-up token must be bound to for an admin wallet top-up (H3). */
     private static final String STEP_UP_ACTION_WALLET_TOP_UP = "wallet_top_up";
     /** Header carrying the single-use, action-bound step-up token (spec 05 §3). */
@@ -111,7 +121,12 @@ public class AdminController {
 
     /** Valid admin step-up actions an OTP challenge may be started for. */
     private static final Set<String> STEP_UP_ACTIONS =
-            Set.of(STEP_UP_ACTION_GRANT_CREDIT, STEP_UP_ACTION_REFUND, STEP_UP_ACTION_WALLET_TOP_UP);
+            Set.of(STEP_UP_ACTION_GRANT_CREDIT, STEP_UP_ACTION_REFUND, STEP_UP_ACTION_WALLET_TOP_UP,
+                   STEP_UP_ACTION_RESOLVE_REFUND_REQUEST, STEP_UP_ACTION_SETTLE_REFUND_RESIDUAL);
+
+    private static final Set<String> REFUND_QUEUE_STATUSES = Set.of(
+            "PENDING", "APPROVING", "APPROVED", "PARTIALLY_SETTLED", "REJECTED", "WITHDRAWN");
+    private static final int REFUND_QUEUE_MAX_LIMIT = 100;
 
     private final DownstreamClient downstream;
     private final AuditEventWriter auditEventWriter;
@@ -241,6 +256,144 @@ public class AdminController {
      *
      * <p>Authorisation: {@code hasRole('PLATFORM_ADMIN')}.
      */
+    /**
+     * The staff refund-request queue. A READ — no step-up, no audit row.
+     *
+     * <p>Returns an envelope, never a bare list. Billing going dark used to render as
+     * {@code 200 []}, indistinguishable from a clear queue.
+     */
+    @GetMapping("/refund-requests")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<Object> listRefundRequests(
+            @RequestParam(name = "status", defaultValue = "PENDING") String status,
+            @RequestParam(name = "limit", defaultValue = "50") int limit) {
+        if (!REFUND_QUEUE_STATUSES.contains(status)) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "invalid_status",
+                    "code", "INVALID_STATUS",
+                    "status", status));
+        }
+        if (limit < 1 || limit > REFUND_QUEUE_MAX_LIMIT) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "invalid_limit",
+                    "code", "INVALID_LIMIT",
+                    "limit", limit));
+        }
+        return ResponseEntity.ok(downstream.listRefundRequests(status, limit));
+    }
+
+    /**
+     * Approve or reject a user's refund request. ONLY an admin can approve, and the ADMIN sets the
+     * final amount — the user's figure is a request, not something the system executes blindly.
+     *
+     * <p>Step-up gated: the token's paramsHash is bound over {requestId, decision, amountCents},
+     * the same map AdminParamsHasher recomputes server-side, so a token authorised to return $20
+     * cannot be replayed to return $500. {@code note} is required on the write but is not in that
+     * hash. Billing independently clamps the amount to the live refundable balance, so a typo
+     * cannot return bonus credit — or money never paid — to a card.
+     */
+    @PostMapping("/refund-requests/{requestId}/resolve")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<Object> resolveRefundRequest(
+            @PathVariable UUID requestId,
+            @Valid @RequestBody ResolveRefundRequestBody body,
+            @RequestHeader(value = STEP_UP_TOKEN_HEADER, required = false) String stepUpToken,
+            @AuthenticationPrincipal Jwt jwt,
+            HttpServletRequest request) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("requestId", requestId.toString());
+        params.put("decision", body.decision());
+        params.put("amountCents", body.amountCents());
+        params.put("note", body.note());
+
+        AdminCommand command = new AdminCommand(actorOf(jwt), null,
+                STEP_UP_ACTION_RESOLVE_REFUND_REQUEST, stepUpToken, params);
+        AdminService.ResolveRefundOutcome outcome = adminService.resolveRefundRequest(command);
+        if (!outcome.success()) {
+            auditEventWriter.writeDeny(actorOf(jwt), ACTION_REFUND_REQUEST_RESOLVE,
+                    RESOURCE_REFUND_REQUEST, requestId.toString(), params, clientIp(request));
+            if (outcome.rejectionReason() == null) {
+                // Billing may already have moved money. Never offer a retry — a fresh OTP is a
+                // new refund. The operator must refresh and read the row's status.
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of(
+                        "error", "downstream_unconfirmed",
+                        "code", "DOWNSTREAM_UNCONFIRMED",
+                        "message", "Billing did not confirm. Refresh and check the status."));
+            }
+            return stepUpRejectionResponse(outcome.rejectionReason(),
+                    STEP_UP_ACTION_RESOLVE_REFUND_REQUEST, params);
+        }
+
+        Map<String, Object> newValue = new LinkedHashMap<>();
+        newValue.put("requestId", requestId.toString());
+        newValue.put("decision", body.decision());
+        newValue.put("status", outcome.status());
+        newValue.put("approvedAmountCents", outcome.approvedAmountCents());
+        newValue.put("refundedCents", outcome.refundedCents());
+        newValue.put("residualCents", outcome.residualCents());
+        auditEventWriter.writeAllow(actorOf(jwt), ACTION_REFUND_REQUEST_RESOLVE,
+                RESOURCE_REFUND_REQUEST, requestId.toString(), null, newValue, clientIp(request));
+        Map<String, Object> bodyOut = new LinkedHashMap<>();
+        bodyOut.put("resolved", true);
+        bodyOut.put("requestId", requestId.toString());
+        bodyOut.put("status", outcome.status());
+        bodyOut.put("approvedAmountCents", outcome.approvedAmountCents());
+        bodyOut.put("refundedCents", outcome.refundedCents());
+        bodyOut.put("residualCents", outcome.residualCents());
+        return ResponseEntity.ok(bodyOut);
+    }
+
+    /**
+     * Unresolved residual rows — money that could not be auto-returned to a card. A READ:
+     * no step-up, no audit row. Envelope, never a bare list, so a billing outage cannot
+     * look like a clear queue.
+     */
+    @GetMapping("/refund-residuals")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<Object> listRefundResiduals() {
+        return ResponseEntity.ok(downstream.listRefundResiduals());
+    }
+
+    /**
+     * Wallet-credit one residual. Step-up gated; paramsHash is bound over {residualId} only.
+     * Billing HTTP 200 is success even on an already-resolved replay ({@code settled=false}).
+     */
+    @PostMapping("/refund-residuals/{residualId}/settle")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<Object> settleRefundResidual(
+            @PathVariable UUID residualId,
+            @RequestHeader(value = STEP_UP_TOKEN_HEADER, required = false) String stepUpToken,
+            @AuthenticationPrincipal Jwt jwt,
+            HttpServletRequest request) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("residualId", residualId.toString());
+
+        AdminCommand command = new AdminCommand(actorOf(jwt), null,
+                STEP_UP_ACTION_SETTLE_REFUND_RESIDUAL, stepUpToken, params);
+        AdminService.SettleResidualOutcome outcome = adminService.settleRefundResidual(command);
+        if (!outcome.success()) {
+            auditEventWriter.writeDeny(actorOf(jwt), ACTION_REFUND_RESIDUAL_SETTLE,
+                    RESOURCE_REFUND_RESIDUAL, residualId.toString(), params, clientIp(request));
+            if (outcome.rejectionReason() == null) {
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of(
+                        "error", "downstream_unconfirmed",
+                        "code", "DOWNSTREAM_UNCONFIRMED",
+                        "message", "Billing did not confirm. Refresh and check the status."));
+            }
+            return stepUpRejectionResponse(outcome.rejectionReason(),
+                    STEP_UP_ACTION_SETTLE_REFUND_RESIDUAL, params);
+        }
+
+        Map<String, Object> newValue = new LinkedHashMap<>();
+        newValue.put("residualId", residualId.toString());
+        auditEventWriter.writeAllow(actorOf(jwt), ACTION_REFUND_RESIDUAL_SETTLE,
+                RESOURCE_REFUND_RESIDUAL, residualId.toString(), null, newValue, clientIp(request));
+        Map<String, Object> bodyOut = new LinkedHashMap<>();
+        bodyOut.put("settled", true);
+        bodyOut.put("residualId", residualId.toString());
+        return ResponseEntity.ok(bodyOut);
+    }
+
     @PostMapping("/users/{userId}/refund")
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ResponseEntity<Object> refund(@PathVariable UUID userId,

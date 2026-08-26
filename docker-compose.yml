@@ -27,6 +27,7 @@ services:
         # Empty by default (show all books); set VITE_CHARGES_CUTOVER in the box's
         # .env (QA) to hide pre-feature books from the COGS-vs-charges table.
         VITE_CHARGES_CUTOVER: "${VITE_CHARGES_CUTOVER:-}"
+        VITE_ENABLE_REFUND_QUEUE: "${VITE_ENABLE_REFUND_QUEUE:-true}"
     ports:
       - "5174:80"
     depends_on:
