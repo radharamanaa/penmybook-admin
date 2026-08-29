@@ -35,3 +35,11 @@ Feature: Admin step-up OTP issues a token that unlocks gated money actions (F2)
     Then the grant response status is 200
     And the refund was sent to billing with an idempotency key
     And the refund receipt reports requested and refunded amounts
+
+  Scenario: A refund naming an approved request forwards refundRequestId to billing
+    Given a platform admin is signed in for step-up
+    When they start an OTP challenge for action "refund" refunding payment 11111111-1111-1111-1111-111111111111 of 2500 cents against request 22222222-2222-2222-2222-222222222222
+    And they verify the OTP challenge with the correct code
+    And they refund payment 11111111-1111-1111-1111-111111111111 of 2500 cents naming request 22222222-2222-2222-2222-222222222222 using the minted step-up token
+    Then the grant response status is 200
+    And the refund was sent to billing naming request 22222222-2222-2222-2222-222222222222

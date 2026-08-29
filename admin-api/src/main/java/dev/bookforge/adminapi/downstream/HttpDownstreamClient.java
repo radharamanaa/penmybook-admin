@@ -470,6 +470,10 @@ public class HttpDownstreamClient implements DownstreamClient {
         // step-up challenge id is the contract-specified per-operation key: one OTP challenge = one
         // refund operation, reused verbatim on a retry, distinct for a freshly-authorised refund.
         body.put("idempotencyKey", challengeIdOf(command.stepUpToken()));
+        Object namedRequest = command.params().get("refundRequestId");
+        if (namedRequest != null && !namedRequest.toString().isBlank()) {
+            body.put("refundRequestId", namedRequest.toString());
+        }
         try {
             JsonNode json = send(downstream.billingUrl() + "/internal/refund", BILLING_AUD,
                     toJson(body), ADMIN_RPC_TIMEOUT);

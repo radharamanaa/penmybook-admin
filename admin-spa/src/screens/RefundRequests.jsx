@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../api.js'
 
-const STATUSES = ['PENDING', 'APPROVING', 'APPROVED', 'PARTIALLY_SETTLED', 'REJECTED', 'WITHDRAWN']
+const STATUSES = [
+  'PENDING', 'APPROVED', 'PAYING', 'SETTLED', 'REJECTED', 'WITHDRAWN',
+]
+
+const STATUS_LABEL = {
+  PAYING: 'in-flight card refund',
+  SETTLED: 'fully paid out',
+}
 
 const STATUS_BADGE = {
   PENDING: 'neutral',
-  APPROVING: 'warn',
   APPROVED: 'on',
-  PARTIALLY_SETTLED: 'warn',
+  PAYING: 'warn',
+  SETTLED: 'on',
   REJECTED: 'off',
   WITHDRAWN: 'neutral',
 }
@@ -121,7 +129,7 @@ export default function RefundRequests() {
       }
       if (otp.kind === 'settle') {
         await api.settleRefundResidual(otp.params.residualId, v.stepUpToken)
-        setOk('Residual settled. Refresh if a PARTIALLY_SETTLED request should now be closed.')
+        setOk('Residual settled. Refresh if an APPROVED request should now be closed.')
       } else {
         // Hashed fields come from otp.params (the server's hash recompute), not the form.
         // Note is editable after OTP start because it is not in the hash.
@@ -187,7 +195,7 @@ export default function RefundRequests() {
             className={status === s ? 'small' : 'ghost small'}
             onClick={() => setStatus(s)}
           >
-            {s.replaceAll('_', ' ')}
+            {STATUS_LABEL[s] ?? s.replaceAll('_', ' ')}
           </button>
         ))}
         <button type="button" className="ghost small" onClick={load}>Refresh</button>
@@ -245,6 +253,14 @@ export default function RefundRequests() {
                         Reject
                       </button>
                     </div>
+                  )}
+                  {row.status === 'APPROVED' && (
+                    <Link
+                      className="small"
+                      to={`/users?refundRequestId=${encodeURIComponent(row.id)}&ownerType=${encodeURIComponent(row.ownerType)}&ownerId=${encodeURIComponent(row.ownerId)}${row.ownerEmail ? `&ownerEmail=${encodeURIComponent(row.ownerEmail)}` : ''}`}
+                    >
+                      Pay out
+                    </Link>
                   )}
                 </td>
               </tr>

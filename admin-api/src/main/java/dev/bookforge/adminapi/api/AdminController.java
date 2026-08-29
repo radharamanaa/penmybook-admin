@@ -125,7 +125,7 @@ public class AdminController {
                    STEP_UP_ACTION_RESOLVE_REFUND_REQUEST, STEP_UP_ACTION_SETTLE_REFUND_RESIDUAL);
 
     private static final Set<String> REFUND_QUEUE_STATUSES = Set.of(
-            "PENDING", "APPROVING", "APPROVED", "PARTIALLY_SETTLED", "REJECTED", "WITHDRAWN");
+            "PENDING", "APPROVED", "REJECTED", "WITHDRAWN", "PAYING", "SETTLED");
     private static final int REFUND_QUEUE_MAX_LIMIT = 100;
 
     private final DownstreamClient downstream;
@@ -403,13 +403,16 @@ public class AdminController {
                                          @AuthenticationPrincipal Jwt jwt,
                                          HttpServletRequest request) {
         // A refund pulls MONEY back out of a user's wallet, so — like grant — it is step-up gated
-        // (B3). The token's paramsHash is bound over {paymentId, refundAmountCents}, the SAME map
-        // AdminParamsHasher recomputes server-side, so a token authorised for one payment/amount
-        // cannot be replayed for another. The refund is routed through the gated
-        // AdminService.refund → runWrite(REFUND) path (NOT the prior un-gated downstream call).
+        // (B3). The token's paramsHash is bound over {paymentId, refundAmountCents} and, when
+        // present, refundRequestId — the SAME map AdminParamsHasher recomputes server-side, so a
+        // token authorised for a bare payout cannot be replayed onto a request payout. The refund
+        // is routed through the gated AdminService.refund → runWrite(REFUND) path.
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("paymentId", body.paymentId().toString());
         params.put("refundAmountCents", body.amountCents());
+        if (body.refundRequestId() != null) {
+            params.put("refundRequestId", body.refundRequestId().toString());
+        }
 
         AdminCommand command = new AdminCommand(actorOf(jwt), userId,
                 STEP_UP_ACTION_REFUND, stepUpToken, params);
@@ -424,6 +427,9 @@ public class AdminController {
         newValue.put("walletDebitedCents", outcome.walletDebitedCents());
         newValue.put("reason", body.reason());
         newValue.put("idempotentReplay", outcome.idempotentReplay());
+        if (body.refundRequestId() != null) {
+            newValue.put("refundRequestId", body.refundRequestId().toString());
+        }
         auditEventWriter.writeAllow(actorOf(jwt), ACTION_REFUND, RESOURCE_PAYMENT,
                 body.paymentId().toString(), null, newValue, clientIp(request));
         return ResponseEntity.ok(new RefundReceiptView(body.paymentId(),

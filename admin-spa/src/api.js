@@ -117,10 +117,12 @@ export const api = {
       body: { amountCents },
       headers: { 'X-Step-Up-Token': stepUpToken },
     }),
-  refund: (userId, paymentId, amountCents, reason, stepUpToken) =>
+  refund: (userId, paymentId, amountCents, reason, stepUpToken, refundRequestId) =>
     request(`/api/v1/admin/users/${userId}/refund`, {
       method: 'POST',
-      body: { paymentId, amountCents, reason },
+      body: refundRequestId
+        ? { paymentId, amountCents, reason, refundRequestId }
+        : { paymentId, amountCents, reason },
       headers: { 'X-Step-Up-Token': stepUpToken },
     }),
 

@@ -54,7 +54,8 @@ public interface DownstreamClient {
     DownstreamResult flagDeveloper(AdminCommand command);
 
     /**
-     * billing {@code POST /internal/refund} — the SINGLE refund path (D6 / P11). Step-up gated
+     * billing {@code POST /internal/refund} — the SINGLE refund path (D6 / P11). Step-up gated.
+     * Forwards {@code refundRequestId} from the command params when present.
      * via {@code AdminService.refund} → {@code runWrite(REFUND)}. The result carries the clamped
      * ask ({@code requestedCents}) and what was actually pulled back ({@code walletDebitedCents})
      * so the controller can return "asked X, refunded Y" (F1 / D). Idempotent on the supplied

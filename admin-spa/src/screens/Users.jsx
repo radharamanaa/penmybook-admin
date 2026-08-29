@@ -1,15 +1,29 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../api.js'
 
 /**
  * User search + money ops. Grant/refund are OTP step-up gated (D6): start a
  * challenge, type the emailed code (dev: read from otp_challenges), the minted
  * single-use token authorises exactly this action + params.
+ *
+ * Queue payout is a deep-link: `/users?refundRequestId=&ownerType=&ownerId=&ownerEmail=&paymentId=`.
+ * When an APPROVED request id is present it is bound into the OTP and forwarded to billing.
  */
 export default function Users() {
-  const [query, setQuery] = useState('')
+  const [searchParams] = useSearchParams()
+  const linkedRequestId = searchParams.get('refundRequestId') || ''
+  const linkedPaymentId = searchParams.get('paymentId') || ''
+  const linkedOwnerId = searchParams.get('ownerId') || ''
+  const linkedEmail = searchParams.get('ownerEmail') || ''
+
+  const [query, setQuery] = useState(linkedEmail)
   const [results, setResults] = useState([])
-  const [selected, setSelected] = useState(null)
+  const [selected, setSelected] = useState(() => (
+    linkedOwnerId
+      ? { userId: linkedOwnerId, email: linkedEmail || linkedOwnerId, accountStatus: 'ACTIVE' }
+      : null
+  ))
   const [error, setError] = useState(null)
   const [ok, setOk] = useState(null)
 
@@ -88,18 +102,24 @@ export default function Users() {
       )}
 
       {selected && (
-        <UserActions user={selected} onDone={(msg) => { setOk(msg); setError(null) }}
+        <UserActions user={selected}
+                     initialPaymentId={linkedPaymentId}
+                     initialRefundRequestId={linkedRequestId}
+                     refundRequestIdReadOnly={Boolean(linkedRequestId)}
+                     onDone={(msg) => { setOk(msg); setError(null) }}
                      onError={(msg) => { setError(msg); setOk(null) }} />
       )}
     </>
   )
 }
 
-function UserActions({ user, onDone, onError }) {
+function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
+                       refundRequestIdReadOnly = false, onDone, onError }) {
   const [topUp, setTopUp] = useState('')
   const [grant, setGrant] = useState('')
-  const [refundPayment, setRefundPayment] = useState('')
+  const [refundPayment, setRefundPayment] = useState(initialPaymentId)
   const [refundCents, setRefundCents] = useState('')
+  const [refundRequestId, setRefundRequestId] = useState(initialRefundRequestId)
   // OTP flow state: which action is mid-challenge + the challenge id + code.
   const [otp, setOtp] = useState(null) // {action, challengeId, params}
   const [code, setCode] = useState('')
@@ -124,7 +144,7 @@ function UserActions({ user, onDone, onError }) {
         onDone(`Topped up ${otp.params.amountCents}¢ for ${user.email}`)
       } else {
         await api.refund(user.userId, otp.params.paymentId, otp.params.refundAmountCents,
-          'admin refund', v.stepUpToken)
+          'admin refund', v.stepUpToken, otp.params.refundRequestId)
         onDone(`Refund issued for payment ${otp.params.paymentId}`)
       }
       setOtp(null)
@@ -166,18 +186,29 @@ function UserActions({ user, onDone, onError }) {
 
       <div className="row">
         <div>
-          <label>Refund — payment ID</label>
-          <input value={refundPayment} onChange={(e) => setRefundPayment(e.target.value)} />
+          <label htmlFor="refund-payment">Refund — payment ID</label>
+          <input id="refund-payment" value={refundPayment}
+                 onChange={(e) => setRefundPayment(e.target.value)} />
         </div>
         <div>
-          <label>Refund amount (cents)</label>
-          <input type="number" min="1" value={refundCents}
+          <label htmlFor="refund-cents">Refund amount (cents)</label>
+          <input id="refund-cents" type="number" min="1" value={refundCents}
                  onChange={(e) => setRefundCents(e.target.value)} />
         </div>
+        <div>
+          <label htmlFor="refund-request-id">Refund request id</label>
+          <input id="refund-request-id" value={refundRequestId} readOnly={refundRequestIdReadOnly}
+                 onChange={(e) => { if (!refundRequestIdReadOnly) setRefundRequestId(e.target.value) }} />
+        </div>
         <button disabled={!refundPayment || !refundCents}
-                onClick={() => startOtp('refund', {
-                  paymentId: refundPayment, refundAmountCents: Number(refundCents),
-                })}>
+                onClick={() => {
+                  const params = {
+                    paymentId: refundPayment,
+                    refundAmountCents: Number(refundCents),
+                  }
+                  if (refundRequestId) params.refundRequestId = refundRequestId
+                  startOtp('refund', params)
+                }}>
           Start OTP refund
         </button>
       </div>
@@ -189,8 +220,8 @@ function UserActions({ user, onDone, onError }) {
       {otp && (
         <div className="row" style={{ marginTop: 14 }}>
           <div>
-            <label>OTP code for <code>{otp.action}</code> (check email / dev DB)</label>
-            <input value={code} onChange={(e) => setCode(e.target.value)} maxLength={6} />
+            <label htmlFor="otp-code">OTP code for <code>{otp.action}</code> (check email / dev DB)</label>
+            <input id="otp-code" value={code} onChange={(e) => setCode(e.target.value)} maxLength={6} />
           </div>
           <button disabled={code.length < 6} onClick={verifyAndExecute}>Verify & execute</button>
           <button className="ghost" onClick={() => setOtp(null)}>Cancel</button>

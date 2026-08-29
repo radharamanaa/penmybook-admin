@@ -110,6 +110,29 @@ describe('api.js', () => {
     expect(init.headers.Authorization).toBeUndefined()
   })
 
+  describe('refund body', () => {
+    it('forwards refundRequestId when staff name an approved request', async () => {
+      await api.refund('u1', 'pay1', 500, 'admin refund', 'tok-abc', 'req-1')
+      const [, init] = global.fetch.mock.calls[0]
+      expect(JSON.parse(init.body)).toEqual({
+        paymentId: 'pay1',
+        amountCents: 500,
+        reason: 'admin refund',
+        refundRequestId: 'req-1',
+      })
+    })
+
+    it('omits refundRequestId on a bare payout', async () => {
+      await api.refund('u1', 'pay1', 500, 'admin refund', 'tok-abc')
+      const [, init] = global.fetch.mock.calls[0]
+      expect(JSON.parse(init.body)).toEqual({
+        paymentId: 'pay1',
+        amountCents: 500,
+        reason: 'admin refund',
+      })
+    })
+  })
+
   describe('resolveRefundRequest', () => {
     it('sends the step-up token and owns a 35s abort, not the default 12s', async () => {
       vi.useFakeTimers()

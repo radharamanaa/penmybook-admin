@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 
 vi.mock('../api.js', () => ({
   api: { searchUsers: vi.fn() },
@@ -14,7 +15,11 @@ describe('Users refund copy (S5)', () => {
     api.searchUsers.mockResolvedValue([
       { userId: 'u1', email: 'a@b.co', accountStatus: 'ACTIVE' },
     ])
-    render(<Users />)
+    render(
+      <MemoryRouter>
+        <Users />
+      </MemoryRouter>,
+    )
     await userEvent.type(screen.getByLabelText(/Email contains/i), 'a@')
     await userEvent.click(screen.getByRole('button', { name: /^Search$/i }))
     await userEvent.click(screen.getByRole('button', { name: /Manage/i }))

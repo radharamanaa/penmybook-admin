@@ -88,12 +88,26 @@ public class AdminStepUpOtpSteps {
 
     @When("they start an OTP challenge for action {string} refunding payment {word} of {long} cents")
     public void startRefundChallenge(String action, String paymentIdRaw, long refundAmountCents) {
+        startRefundChallenge(action, paymentIdRaw, refundAmountCents, null);
+    }
+
+    @When("they start an OTP challenge for action {string} refunding payment {word} of {long} cents against request {word}")
+    public void startRefundChallengeAgainstRequest(String action, String paymentIdRaw,
+                                                   long refundAmountCents, String requestIdRaw) {
+        startRefundChallenge(action, paymentIdRaw, refundAmountCents, UUID.fromString(requestIdRaw));
+    }
+
+    private void startRefundChallenge(String action, String paymentIdRaw, long refundAmountCents,
+                                      UUID requestId) {
         this.action = action;
         this.paymentId = UUID.fromString(paymentIdRaw);
         this.amountCents = refundAmountCents;
         this.stepUpParams = new LinkedHashMap<>();
         this.stepUpParams.put("paymentId", paymentId.toString());
         this.stepUpParams.put("refundAmountCents", refundAmountCents);
+        if (requestId != null) {
+            this.stepUpParams.put("refundRequestId", requestId.toString());
+        }
         startChallenge();
     }
 
@@ -175,10 +189,23 @@ public class AdminStepUpOtpSteps {
 
     @And("they refund payment {word} of {long} cents using the minted step-up token")
     public void refundWithMintedToken(String paymentIdRaw, long refundAmountCents) {
+        refundWithMintedToken(paymentIdRaw, refundAmountCents, null);
+    }
+
+    @And("they refund payment {word} of {long} cents naming request {word} using the minted step-up token")
+    public void refundWithMintedTokenNamingRequest(String paymentIdRaw, long refundAmountCents,
+                                                   String requestIdRaw) {
+        refundWithMintedToken(paymentIdRaw, refundAmountCents, UUID.fromString(requestIdRaw));
+    }
+
+    private void refundWithMintedToken(String paymentIdRaw, long refundAmountCents, UUID requestId) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("paymentId", paymentIdRaw);
         body.put("amountCents", refundAmountCents);
         body.put("reason", "duplicate charge");
+        if (requestId != null) {
+            body.put("refundRequestId", requestId.toString());
+        }
         lastResponse = send(HttpMethod.POST,
                 "/v1/admin/users/" + TARGET_USER + "/refund", body, mintedToken);
     }
@@ -196,6 +223,15 @@ public class AdminStepUpOtpSteps {
                 .withRequestBody(matchingJsonPath("$.stepUpChallengeId",
                         equalTo(challengeId.toString())))
                 .withRequestBody(matchingJsonPath("$.amountCents", equalTo("500"))));
+    }
+
+    @And("the refund was sent to billing naming request {word}")
+    public void refundSentToBillingNamingRequest(String requestIdRaw) {
+        AdminWireMock.server().verify(postRequestedFor(urlMatching("/internal/refund"))
+                .withRequestBody(matchingJsonPath("$.refundRequestId",
+                        equalTo(requestIdRaw)))
+                .withRequestBody(matchingJsonPath("$.paymentId",
+                        equalTo(paymentId.toString()))));
     }
 
     @And("the refund was sent to billing with an idempotency key")

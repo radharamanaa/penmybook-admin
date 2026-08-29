@@ -68,6 +68,21 @@ Feature: Resolving a user's refund request is platform-admin only and step-up ga
     When they view the refund-request queue filtered to "NOPE"
     Then the response status is 400
 
+  Scenario: Retired Approving and Partially settled filters are refused locally
+    Given a platform admin is signed in
+    When they view the refund-request queue filtered to "APPROVING"
+    Then the response status is 400
+
+  Scenario: The queue can be filtered to PAYING
+    Given a platform admin is signed in
+    When they view the refund-request queue filtered to "PAYING"
+    Then the response status is 200
+
+  Scenario: The queue can be filtered to SETTLED
+    Given a platform admin is signed in
+    When they view the refund-request queue filtered to "SETTLED"
+    Then the response status is 200
+
   Scenario: A billing timeout on resolve is a 502 telling the operator to refresh
     Given a platform admin is signed in
     When they resolve a refund request but billing does not confirm

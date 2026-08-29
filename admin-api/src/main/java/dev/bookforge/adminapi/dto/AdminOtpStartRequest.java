@@ -14,7 +14,8 @@ import java.util.UUID;
  * {@code grant_credit} or {@code refund}. {@code targetUserId} and {@code params} are bound into
  * the eventual token's {@code paramsHash} (via {@link dev.bookforge.adminapi.security.AdminParamsHasher})
  * so the authorisation cannot be replayed for a different target/amount. For a grant {@code params}
- * carries {@code amountCents}; for a refund {@code paymentId} + {@code refundAmountCents}.
+ * carries {@code amountCents}; for a refund {@code paymentId} + {@code refundAmountCents}
+ * and, when paying out an approved request, {@code refundRequestId}.
  *
  * @param action       the admin step-up action ({@code grant_credit} / {@code refund}).
  * @param targetUserId the user the action targets (bound into the token's paramsHash).
