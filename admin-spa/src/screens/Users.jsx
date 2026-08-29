@@ -181,6 +181,10 @@ function UserActions({ user, onDone, onError }) {
           Start OTP refund
         </button>
       </div>
+      <p className="sub">
+        Uses live remaining on the payment. Leftover promo inside remaining can ride the
+        Paddle refund; we forfeit bonus we can identify.
+      </p>
 
       {otp && (
         <div className="row" style={{ marginTop: 14 }}>

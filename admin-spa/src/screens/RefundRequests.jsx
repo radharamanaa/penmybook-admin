@@ -161,9 +161,10 @@ export default function RefundRequests() {
     <>
       <h1>Refund requests</h1>
       <p className="sub">
-        Users ask; you decide the amount. Approval returns card-funded money only — bonus
-        credit is never sent to a card. Identity names load when entitlements answers; a quiet
-        banner shows if they do not. Residuals below are money that could not go back to a card.
+        Users ask; you decide the amount against the live refundable figure (snapshot is
+        what we quoted). Leftover promo inside remaining can ride the Paddle refund.
+        Identity names load when entitlements answers; a quiet banner shows if they do
+        not. Residuals below are money that could not go back to a card.
       </p>
       {error && <div className="msg error">{error}</div>}
       {ok && <div className="msg ok">{ok}</div>}
