@@ -71,6 +71,15 @@ describe('Users refundRequestId (U4 / S7)', () => {
     )
   })
 
+  it('does not mint a user from an ORG payout deep-link', () => {
+    renderUsers(
+      `?refundRequestId=${REQUEST_ID}&ownerType=ORG&ownerId=org-1&ownerEmail=org@b.co&paymentId=${PAYMENT_ID}`,
+    )
+    expect(screen.getByRole('status')).toHaveTextContent(/org payout is not wired/i)
+    expect(screen.getByRole('status')).toHaveTextContent(REQUEST_ID)
+    expect(screen.queryByRole('button', { name: /start otp refund/i })).toBeNull()
+  })
+
   it('omits refundRequestId on a bare payout when no request is named', async () => {
     searchUsers.mockResolvedValue([
       { userId: 'u1', email: 'a@b.co', accountStatus: 'ACTIVE' },

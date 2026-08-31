@@ -25,5 +25,6 @@ describe('Users refund copy (S5)', () => {
     await userEvent.click(screen.getByRole('button', { name: /Manage/i }))
     expect(screen.getByText(/leftover promo inside remaining/i)).toBeInTheDocument()
     expect(screen.queryByText(/never sent to a card/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/forfeit bonus we can identify/i)).not.toBeInTheDocument()
   })
 })

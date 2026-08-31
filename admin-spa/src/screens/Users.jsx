@@ -16,11 +16,13 @@ export default function Users() {
   const linkedPaymentId = searchParams.get('paymentId') || ''
   const linkedOwnerId = searchParams.get('ownerId') || ''
   const linkedEmail = searchParams.get('ownerEmail') || ''
+  const linkedOwnerType = searchParams.get('ownerType') || ''
+  const orgPayoutUnwired = Boolean(linkedRequestId && linkedOwnerType && linkedOwnerType !== 'USER')
 
   const [query, setQuery] = useState(linkedEmail)
   const [results, setResults] = useState([])
   const [selected, setSelected] = useState(() => (
-    linkedOwnerId
+    linkedOwnerId && !orgPayoutUnwired
       ? { userId: linkedOwnerId, email: linkedEmail || linkedOwnerId, accountStatus: 'ACTIVE' }
       : null
   ))
@@ -67,6 +69,11 @@ export default function Users() {
       <p className="sub">Search by email; wallet top-up, OTP-gated grants and refunds.</p>
       {error && <div className="msg error">{error}</div>}
       {ok && <div className="msg ok">{ok}</div>}
+      {orgPayoutUnwired && (
+        <div className="msg error" role="status">
+          Open org payout is not wired on this screen — use request {linkedRequestId} from the org tools.
+        </div>
+      )}
 
       <form className="panel row" onSubmit={search}>
         <div>
@@ -214,7 +221,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
       </div>
       <p className="sub">
         Uses live remaining on the payment. Leftover promo inside remaining can ride the
-        Paddle refund; we forfeit bonus we can identify.
+        Paddle refund.
       </p>
 
       {otp && (

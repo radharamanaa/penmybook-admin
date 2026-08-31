@@ -50,6 +50,7 @@ describe('RefundRequests honest promo copy (S5)', () => {
     expect(screen.getByRole('columnheader', { name: /Live refundable/i })).toBeInTheDocument()
     expect(screen.getByText(/leftover promo inside remaining/i)).toBeInTheDocument()
     expect(screen.queryByText(/never sent to a card/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/forfeit bonus we can identify/i)).not.toBeInTheDocument()
   })
 })
 
