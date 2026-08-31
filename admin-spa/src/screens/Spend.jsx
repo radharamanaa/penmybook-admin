@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api.js'
-import { addUsageCounts, formatSpendRows } from './spendFormats.js'
+import {
+  addUsageCounts,
+  formatJoinWarning,
+  formatSpendRows,
+  lanesHaveFormatCounts,
+  usageHasFormatCounts,
+} from './spendFormats.js'
 
 /**
  * Spend dashboard — EXACT cents off the money ledgers (entitlements consumptions +
@@ -44,6 +50,11 @@ function MoneyPanel({ title, money }) {
       )}
     </div>
   )
+}
+
+function FormatJoinNotice({ warning }) {
+  if (!warning) return null
+  return <div className="msg error">{warning}</div>
 }
 
 function FormatSpendPanel({ title, usage, byAction }) {
@@ -242,8 +253,11 @@ function UsagePanel({ usage }) {
 
 export default function Spend() {
   const [global, setGlobal] = useState(null)
+  const [globalError, setGlobalError] = useState(null)
   const [flows, setFlows] = useState(null)
   const [lanes, setLanes] = useState(null)
+  const [lanesError, setLanesError] = useState(null)
+  const [platformSettled, setPlatformSettled] = useState(false)
   const [paymentsHealth, setPaymentsHealth] = useState(null)
   const [paymentsHealthError, setPaymentsHealthError] = useState(null)
   const [mode, setMode] = useState('user') // 'user' | 'org'
@@ -266,9 +280,21 @@ export default function Spend() {
     const [g, f, l, h] = await Promise.allSettled([
       api.spendGlobal(), api.spendFlows(), api.usageLanes(), api.paymentsHealth(),
     ])
-    if (g.status === 'fulfilled') setGlobal(g.value)
+    if (g.status === 'fulfilled') {
+      setGlobal(g.value)
+      setGlobalError(null)
+    } else {
+      setGlobal(null)
+      setGlobalError(g.reason?.message ?? 'wallet spend unavailable')
+    }
     if (f.status === 'fulfilled') setFlows(f.value)
-    if (l.status === 'fulfilled') setLanes(l.value)
+    if (l.status === 'fulfilled') {
+      setLanes(l.value)
+      setLanesError(null)
+    } else {
+      setLanes(null)
+      setLanesError(l.reason?.message ?? 'usage lanes unavailable')
+    }
     if (h.status === 'fulfilled') {
       setPaymentsHealth(h.value)
       setPaymentsHealthError(null)
@@ -278,6 +304,8 @@ export default function Spend() {
     }
     const failed = [g, f, l].filter((r) => r.status === 'rejected')
     if (failed.length > 0) setError(failed[0].reason?.message ?? 'failed to load global figures')
+    else setError(null)
+    setPlatformSettled(true)
   }, [])
 
   useEffect(() => { loadGlobal() }, [loadGlobal])
@@ -361,11 +389,22 @@ export default function Spend() {
       <FlowsPanel flows={flows} />
       <PaymentsHealthPanel health={paymentsHealth} error={paymentsHealthError} />
       <LanesPanel lanes={lanes} />
-      {global && (
+      {platformSettled && lanesHaveFormatCounts(lanes) && global && (
         <FormatSpendPanel
           title="Publish by format (platform)"
-          usage={addUsageCounts(lanes?.individual, lanes?.org)}
+          usage={addUsageCounts(lanes.individual, lanes.org)}
           byAction={global.byAction}
+        />
+      )}
+      {platformSettled && (
+        <FormatJoinNotice
+          warning={formatJoinWarning({
+            moneyLoaded: Boolean(global),
+            countsReady: lanesHaveFormatCounts(lanes),
+            staleCounts: Boolean(lanes) && !lanesHaveFormatCounts(lanes),
+            moneyError: globalError,
+            usageError: lanesError,
+          })}
         />
       )}
       {global && <ByActionPanel byAction={global.byAction} />}
@@ -424,11 +463,22 @@ export default function Spend() {
             </>
           )}
           {usageError && <div className="msg error">Usage figures: {usageError}</div>}
-          {(money || usage) && (
+          {!busy && usageHasFormatCounts(usage) && money && (
             <FormatSpendPanel
               title="Publish by format"
               usage={usage}
-              byAction={money?.byAction}
+              byAction={money.byAction}
+            />
+          )}
+          {!busy && (
+            <FormatJoinNotice
+              warning={formatJoinWarning({
+                moneyLoaded: Boolean(money),
+                countsReady: usageHasFormatCounts(usage),
+                staleCounts: Boolean(usage) && !usageHasFormatCounts(usage),
+                moneyError,
+                usageError,
+              })}
             />
           )}
           <UsagePanel usage={usage} />
