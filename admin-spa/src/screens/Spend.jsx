@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api.js'
+import { addUsageCounts, formatSpendRows } from './spendFormats.js'
 
 /**
  * Spend dashboard — EXACT cents off the money ledgers (entitlements consumptions +
@@ -41,6 +42,40 @@ function MoneyPanel({ title, money }) {
           <Stat value={fmtUsd(money.paymentClawbackCents)} label="wallet clawed back" />
         </div>
       )}
+    </div>
+  )
+}
+
+function FormatSpendPanel({ title, usage, byAction }) {
+  const rows = formatSpendRows(usage, byAction)
+  return (
+    <div className="panel">
+      <h2 style={{ marginTop: 0 }}>{title}</h2>
+      <p className="sub">
+        Unique books that have that bind profile, plus customer wallet spend for
+        that publish action (gross, before refunds). A book in two formats
+        counts in both rows; a $0 digital first-publish still counts as a book.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Format</th>
+            <th>Books</th>
+            <th>Charges</th>
+            <th>Customer $</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.label}>
+              <td>{row.label}</td>
+              <td>{fmtCount(row.books)}</td>
+              <td>{fmtCount(row.chargeCount)}</td>
+              <td>{fmtUsd(row.spentCents)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -152,7 +187,10 @@ function usageRows(usage) {
     ['books', fmtCount(usage.books_total)],
     ['generation finished', fmtCount(usage.books_generation_finished)],
     ['published', fmtCount(usage.books_published)],
+    ['digital PDF', fmtCount(usage.books_digital)],
     ['printed (KDP)', fmtCount(usage.books_printed)],
+    ['kindle', fmtCount(usage.books_kindle)],
+    ['epub', fmtCount(usage.books_epub)],
     ['generated chapters', fmtCount(usage.generated_chapters_total)],
     ['avg chapters/book', usage.avg_generated_chapters_per_book ?? 0],
     ['est. LLM cost (all phases)*', fmtUsd(Math.round((usage.estimated_llm_cost_usd ?? 0) * 100))],
@@ -323,6 +361,13 @@ export default function Spend() {
       <FlowsPanel flows={flows} />
       <PaymentsHealthPanel health={paymentsHealth} error={paymentsHealthError} />
       <LanesPanel lanes={lanes} />
+      {global && (
+        <FormatSpendPanel
+          title="Publish by format (platform)"
+          usage={addUsageCounts(lanes?.individual, lanes?.org)}
+          byAction={global.byAction}
+        />
+      )}
       {global && <ByActionPanel byAction={global.byAction} />}
 
       <form className="panel row" onSubmit={lookup}>
@@ -379,6 +424,13 @@ export default function Spend() {
             </>
           )}
           {usageError && <div className="msg error">Usage figures: {usageError}</div>}
+          {(money || usage) && (
+            <FormatSpendPanel
+              title="Publish by format"
+              usage={usage}
+              byAction={money?.byAction}
+            />
+          )}
           <UsagePanel usage={usage} />
         </>
       )}
