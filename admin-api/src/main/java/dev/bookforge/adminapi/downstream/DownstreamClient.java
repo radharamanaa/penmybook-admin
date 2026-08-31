@@ -175,6 +175,7 @@ public interface DownstreamClient {
 
     /**
      * entitlements {@code POST /internal/admin/spend/by-books} — per-book GROSS wallet charges
+     * (pre-refund) with generation/edit/extend/publish buckets.
      * for the given book ids. Implementations fail-soft to an empty list with {@code degraded=true}.
      */
     SpendByBooksResponse chargesByBooks(List<String> bookIds);

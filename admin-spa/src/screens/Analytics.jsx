@@ -102,11 +102,17 @@ export default function Analytics() {
 
       setBookRows(booksList.map((row) => {
         const costCents = usdToCents(row.estimated_cost_usd)
-        const chargedCents = chargeMap[row.book_id]?.chargedCents ?? 0
+        const charged = chargeMap[row.book_id] ?? {}
+        const chargedCents = charged.chargedCents ?? 0
         return {
           ...row,
           costCents,
           chargedCents,
+          generationCents: charged.generationCents ?? 0,
+          editCents: charged.editCents ?? 0,
+          extendCents: charged.extendCents ?? 0,
+          publishCents: charged.publishCents ?? 0,
+          otherCents: charged.otherCents ?? 0,
           deltaCents: chargedCents - costCents,
         }
       }))
@@ -264,12 +270,15 @@ export default function Analytics() {
       </div>
 
       <div className="panel">
-        <h2 style={{ marginTop: 0 }}>Per-book COGS vs charges</h2>
+        <h2 style={{ marginTop: 0 }}>Per-book customer spend vs COGS</h2>
         <p className="sub">
           {CHARGES_COMPARISON_CUTOVER
             ? `Books created on/after ${CHARGES_COMPARISON_CUTOVER.slice(0, 10)}. `
             : 'All books. '}
-          COGS from token usage; charges billed are gross (pre-refund). Δ = charges − cost (cents).
+          Customer $ is wallet GROSS (pre-refund). Generation = chapter generate (v1 / no version)
+          + cover; extend = chapter generate on version ≥ 2; edit = chapter/image/cover-regen;
+          publish = the four format actions. Other = leftover priced actions (e.g. version-create).
+          COGS is our token estimate at current rates. Δ = charges − cost (cents).
         </p>
         {chargesDegraded && (
           <div className="msg error">
@@ -282,14 +291,19 @@ export default function Analytics() {
               <th>Book</th>
               <th>Status</th>
               <th>Created</th>
+              <th>Customer: generate</th>
+              <th>Customer: edit</th>
+              <th>Customer: extend</th>
+              <th>Customer: publish</th>
+              <th>Customer: other</th>
+              <th>Customer total</th>
               <th>COGS (tokens)</th>
-              <th>Charges billed (gross, pre-refund)</th>
               <th>Δ (charges − cost)</th>
             </tr>
           </thead>
           <tbody>
             {bookRows.length === 0 ? (
-              <tr><td colSpan={6} className="sub">No books in this period.</td></tr>
+              <tr><td colSpan={11} className="sub">No books in this period.</td></tr>
             ) : bookRows.map((row) => (
               <tr key={row.book_id}>
                 <td>
@@ -298,8 +312,13 @@ export default function Analytics() {
                 </td>
                 <td className="mono">{row.status}</td>
                 <td>{row.created_at ? row.created_at.slice(0, 10) : '—'}</td>
-                <td>{fmtUsd(row.costCents)}</td>
+                <td>{fmtUsd(row.generationCents)}</td>
+                <td>{fmtUsd(row.editCents)}</td>
+                <td>{fmtUsd(row.extendCents)}</td>
+                <td>{fmtUsd(row.publishCents)}</td>
+                <td>{fmtUsd(row.otherCents)}</td>
                 <td>{fmtUsd(row.chargedCents)}</td>
+                <td>{fmtUsd(row.costCents)}</td>
                 <td>{fmtUsd(row.deltaCents)}</td>
               </tr>
             ))}

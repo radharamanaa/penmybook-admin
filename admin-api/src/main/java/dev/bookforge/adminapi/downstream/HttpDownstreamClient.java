@@ -723,8 +723,10 @@ public class HttpDownstreamClient implements DownstreamClient {
      * Per-book GROSS charges. Fail-soft on any transport/HTTP/parse failure so a slow
      * entitlements never 502s the Analytics page — an empty list with {@code degraded=true}
      * is returned (zeros render, and the UI shows a "lookup failed" warning so degraded
-     * entitlements is distinguishable from "no charges"). No circuit breaker: a dashboard
-     * miss must not open the entitlements-reports breaker used by spend tiles.
+     * entitlements is distinguishable from "no charges"). Bucket cents are {@code requireLong}:
+     * entitlements, admin-api, and admin-spa ship together; a lump-only payload is a
+     * contract break, not a silent $0 split. No circuit breaker: a dashboard miss must
+     * not open the entitlements-reports breaker used by spend tiles.
      */
     @Override
     public SpendByBooksResponse chargesByBooks(List<String> bookIds) {
@@ -747,7 +749,12 @@ public class HttpDownstreamClient implements DownstreamClient {
                 out.add(new SpendByBookChargeView(
                         bookId,
                         requireLong(row, "chargedCents", "entitlements spend by-books"),
-                        requireLong(row, "chargeCount", "entitlements spend by-books")));
+                        requireLong(row, "chargeCount", "entitlements spend by-books"),
+                        requireLong(row, "generationCents", "entitlements spend by-books"),
+                        requireLong(row, "editCents", "entitlements spend by-books"),
+                        requireLong(row, "extendCents", "entitlements spend by-books"),
+                        requireLong(row, "publishCents", "entitlements spend by-books"),
+                        requireLong(row, "otherCents", "entitlements spend by-books")));
             }
             return new SpendByBooksResponse(false, out);
         } catch (Exception e) {
