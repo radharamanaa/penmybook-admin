@@ -165,6 +165,9 @@ export const api = {
     request('/api/v1/admin/waitlist/config', {
       method: 'POST', body: { enabled, weeklyApprovalLimit },
     }),
+  preAdmitEmail: (email) =>
+    request('/api/v1/admin/waitlist/pre-admit', { method: 'POST', body: { email } }),
+  listPreAdmits: () => request('/api/v1/admin/waitlist/pre-admits'),
 
   // ── analytics (book_admin proxy → curator internal) ──
   analyticsConversations: (period = 'last_week') =>
