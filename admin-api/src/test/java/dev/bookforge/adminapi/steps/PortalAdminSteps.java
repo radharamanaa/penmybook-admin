@@ -687,6 +687,85 @@ public class PortalAdminSteps {
         lastResponse = send(HttpMethod.POST, "/v1/admin/waitlist/config", body);
     }
 
+    // ───────── When/Then — pre-admit by email (2026-09-03) ─────────
+
+    @When("they attempt to pre-admit the email {string}")
+    public void attemptPreAdmit(String email) {
+        preAdmit(email);
+    }
+
+    @When("they pre-admit the email {string}")
+    public void doPreAdmit(String email) {
+        preAdmit(email);
+    }
+
+    private void preAdmit(String email) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("email", email);
+        lastResponse = send(HttpMethod.POST, "/v1/admin/waitlist/pre-admit", body);
+    }
+
+    @When("they list pending pre-admits")
+    public void listPreAdmits() {
+        lastResponse = sendGet("/v1/admin/waitlist/pre-admits");
+    }
+
+    @Given("entitlements rejects pre-admits with reason {string}")
+    public void entitlementsRejectsPreAdmits(String reason) {
+        AdminWireMock.server().stubFor(
+                com.github.tomakehurst.wiremock.client.WireMock.post(
+                                com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo("/internal/admin/pre-admit"))
+                        .willReturn(com.github.tomakehurst.wiremock.client.WireMock.aResponse()
+                                .withStatus(200)
+                                .withHeader("Content-Type", "application/json")
+                                .withBody("{\"admitted\":false,\"reason\":\"" + reason + "\"}")));
+    }
+
+    @And("the pre-admit response is admitted")
+    public void preAdmitResponseAdmitted() {
+        JsonNode body = parseBody();
+        assertThat(body.path("admitted").asBoolean()).isTrue();
+        assertThat(body.path("expiresAt").asText()).isEqualTo("2026-10-03T10:00:00Z");
+    }
+
+    @And("the pre-admit response is rejected with reason {string}")
+    public void preAdmitResponseRejected(String reason) {
+        JsonNode body = parseBody();
+        assertThat(body.path("admitted").asBoolean()).isFalse();
+        assertThat(body.path("reason").asText()).isEqualTo(reason);
+    }
+
+    @And("the pending pre-admits include {string}")
+    public void pendingPreAdmitsInclude(String email) {
+        JsonNode rows = parseBody();
+        boolean found = false;
+        for (JsonNode row : rows) {
+            found |= email.equals(row.path("email").asText());
+        }
+        assertThat(found).as("pending pre-admits contain %s", email).isTrue();
+    }
+
+    @And("the entitlements pre-admit call carried the service subject {string} and email {string}")
+    public void preAdmitCallCarriedSubject(String subject, String email) {
+        var requests = AdminWireMock.server().findAll(postRequestedFor(
+                com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo("/internal/admin/pre-admit")));
+        assertThat(requests).isNotEmpty();
+        String bearer = requests.get(0).getHeader("Authorization").replaceFirst("^Bearer ", "");
+        String payload = new String(java.util.Base64.getUrlDecoder().decode(bearer.split("\\.")[1]),
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(payload).contains("\"sub\":\"" + subject + "\"");
+        assertThat(requests.get(0).getBodyAsString()).contains("\"email\":\"" + email + "\"");
+    }
+
+    @And("the audit log has no ALLOW row for action {string}")
+    public void auditNoAllow(String action) {
+        AdminWireMock.server().verify(0, postRequestedFor(urlMatching("/internal/audit-log"))
+                .withRequestBody(matchingJsonPath("$.decision",
+                        com.github.tomakehurst.wiremock.client.WireMock.equalTo("ALLOW")))
+                .withRequestBody(matchingJsonPath("$.action",
+                        com.github.tomakehurst.wiremock.client.WireMock.equalTo(action))));
+    }
+
     // ───────── When — payments health ─────────
 
     @When("they read payments health")

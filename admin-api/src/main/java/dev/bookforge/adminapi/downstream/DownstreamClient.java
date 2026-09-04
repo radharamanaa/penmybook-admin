@@ -15,6 +15,8 @@ import dev.bookforge.adminapi.dto.PlatformAdminUpdateView;
 import dev.bookforge.adminapi.dto.SpendByBooksResponse;
 import dev.bookforge.adminapi.dto.SpendReportView;
 import dev.bookforge.adminapi.dto.UserSearchResultEntry;
+import dev.bookforge.adminapi.dto.PreAdmitEntryView;
+import dev.bookforge.adminapi.dto.PreAdmitView;
 import dev.bookforge.adminapi.dto.WaitlistAdmitView;
 import dev.bookforge.adminapi.dto.WaitlistConfigView;
 import dev.bookforge.adminapi.dto.WaitlistEntryView;
@@ -153,6 +155,12 @@ public interface DownstreamClient {
 
     /** entitlements {@code POST /internal/admin/waitlist/config} — partial update (null = unchanged). */
     WaitlistConfigView updateWaitlistConfig(Boolean enabled, Integer weeklyApprovalLimit, String updatedBy);
+
+    /** entitlements {@code POST /internal/admin/pre-admit} — pre-approve an email for signup. */
+    PreAdmitView preAdmitEmail(String email, UUID staffUserId);
+
+    /** entitlements {@code GET /internal/admin/pre-admits} — pending (unconsumed, unexpired) pre-admits. */
+    List<PreAdmitEntryView> listPreAdmits();
 
     /**
      * entitlements {@code POST /internal/audit-log} — ship one audit row. Synchronous; callers

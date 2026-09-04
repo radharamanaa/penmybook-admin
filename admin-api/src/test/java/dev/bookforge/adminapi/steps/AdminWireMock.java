@@ -74,6 +74,7 @@ public class AdminWireMock {
         stubEntitlementsUserSearch();
         stubEntitlementsUsersByIds();
         stubEntitlementsWaitlist();
+        stubEntitlementsPreAdmit();
         stubEntitlementsOrgPricingUpsert();
         stubEntitlementsAuditLog();
         // Admin step-up OTP (F2) — entitlements code store ↓
@@ -235,6 +236,24 @@ public class AdminWireMock {
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")
                         .withBody("{\"enabled\":true,\"weeklyApprovalLimit\":100,\"admittedThisWeek\":3}")));
+    }
+
+    /** entitlements pre-admit endpoints (2026-09-03): accept by default; the list has one pending row. */
+    private static void stubEntitlementsPreAdmit() {
+        server.stubFor(post(urlPathEqualTo("/internal/admin/pre-admit"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"admitted\":true,\"reason\":null,\"expiresAt\":\"2026-10-03T10:00:00Z\"}")));
+        server.stubFor(get(urlPathEqualTo("/internal/admin/pre-admits"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("[{\"id\":\"019200aa-0000-7000-8000-000000000001\","
+                                + "\"email\":\"pending@example.com\","
+                                + "\"admittedBy\":\"019200aa-0000-7000-8000-0000000000aa\","
+                                + "\"createdAt\":\"2026-09-03T10:00:00Z\","
+                                + "\"expiresAt\":\"2026-10-03T10:00:00Z\"}]")));
     }
 
     /** entitlements {@code POST /internal/pricing/org-override} — upsert per-org price. */

@@ -20,6 +20,8 @@ import dev.bookforge.adminapi.dto.SpendByBookChargeView;
 import dev.bookforge.adminapi.dto.SpendByBooksResponse;
 import dev.bookforge.adminapi.dto.SpendReportView;
 import dev.bookforge.adminapi.dto.UserSearchResultEntry;
+import dev.bookforge.adminapi.dto.PreAdmitEntryView;
+import dev.bookforge.adminapi.dto.PreAdmitView;
 import dev.bookforge.adminapi.dto.WaitlistAdmitView;
 import dev.bookforge.adminapi.dto.WaitlistConfigView;
 import dev.bookforge.adminapi.dto.WaitlistEntryView;
@@ -186,6 +188,37 @@ public class HttpDownstreamClient implements DownstreamClient {
         body.put("updatedBy", updatedBy);
         String url = downstream.entitlementsUrl() + "/internal/admin/waitlist/config";
         return parseWaitlistConfig(send(url, ENTITLEMENTS_AUD, toJson(body), ADMIN_RPC_TIMEOUT));
+    }
+
+    @Override
+    @CircuitBreaker(name = CB_ENTITLEMENTS)
+    public PreAdmitView preAdmitEmail(String email, UUID staffUserId) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("email", email);
+        body.put("staffUserId", staffUserId.toString());
+        String url = downstream.entitlementsUrl() + "/internal/admin/pre-admit";
+        JsonNode json = send(url, ENTITLEMENTS_AUD, toJson(body), ADMIN_RPC_TIMEOUT);
+        return new PreAdmitView(json.path("admitted").asBoolean(false), textOrNull(json, "reason"),
+                parseNullableInstant(json, "expiresAt"));
+    }
+
+    @Override
+    @CircuitBreaker(name = CB_ENTITLEMENTS)
+    public List<PreAdmitEntryView> listPreAdmits() {
+        String url = downstream.entitlementsUrl() + "/internal/admin/pre-admits";
+        JsonNode json = get(url, ENTITLEMENTS_AUD, ADMIN_RPC_TIMEOUT);
+        List<PreAdmitEntryView> out = new ArrayList<>();
+        if (json != null && json.isArray()) {
+            for (JsonNode row : json) {
+                out.add(new PreAdmitEntryView(
+                        optionalUuid(row, "id"),
+                        textOrNull(row, "email"),
+                        optionalUuid(row, "admittedBy"),
+                        parseNullableInstant(row, "createdAt"),
+                        parseNullableInstant(row, "expiresAt")));
+            }
+        }
+        return out;
     }
 
     private WaitlistConfigView parseWaitlistConfig(JsonNode json) {

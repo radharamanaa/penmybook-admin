@@ -42,6 +42,9 @@ public class ServiceAccountTokenFactory {
         this.objectMapper = objectMapper;
     }
 
+    /** Matches InternalController.ADMIN_API_SUBJECT in entitlements. */
+    static final String SERVICE_SUBJECT = "service:admin_api";
+
     /** @param targetAudience the callee service: entitlements | billing | org. */
     public String mint(String targetAudience) {
         try {
@@ -52,6 +55,9 @@ public class ServiceAccountTokenFactory {
             long now = Instant.now().getEpochSecond();
             Map<String, Object> claims = new LinkedHashMap<>();
             claims.put("iss", properties.issuer());
+            // Caller identity for entitlements' caller-allowlisted routes (pre-admit). Every other
+            // mesh verifier treats sub as optional, so stamping it on every token is safe.
+            claims.put("sub", SERVICE_SUBJECT);
             claims.put("aud", targetAudience);
             claims.put("exp", now + TTL_SECONDS);
             claims.put("scope", "internal");

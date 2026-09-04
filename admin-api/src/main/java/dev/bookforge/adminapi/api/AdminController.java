@@ -3,6 +3,8 @@ package dev.bookforge.adminapi.api;
 import dev.bookforge.adminapi.downstream.DownstreamClient;
 import dev.bookforge.adminapi.downstream.DownstreamResult;
 import dev.bookforge.adminapi.dto.ResolveRefundRequestBody;
+import dev.bookforge.adminapi.dto.PreAdmitEntryView;
+import dev.bookforge.adminapi.dto.PreAdmitView;
 import dev.bookforge.adminapi.dto.WaitlistAdmitView;
 import dev.bookforge.adminapi.dto.WaitlistConfigView;
 import dev.bookforge.adminapi.dto.WaitlistEntryView;
@@ -804,6 +806,42 @@ public class AdminController {
 
     /** Partial waitlist-config update body — null fields are left unchanged. */
     public record WaitlistConfigUpdateRequest(Boolean enabled, Integer weeklyApprovalLimit) {
+    }
+
+    // ───────── 9c. Pre-admit by email (2026-09-03) ─────────
+
+    private static final String ACTION_PRE_ADMIT_EMAIL = "PRE_ADMIT_EMAIL";
+
+    /** Body for {@code POST /waitlist/pre-admit}. */
+    public record PreAdmitRequest(@jakarta.validation.constraints.NotBlank String email) {
+    }
+
+    /**
+     * Pre-approve an email address: the future signup lands ACTIVE, one weekly slot is claimed
+     * now, and the invitee is emailed. Rejections come back 200 with a reason (same shape as
+     * admit). Only an accepted pre-admit is audited as ALLOW.
+     */
+    @PostMapping("/waitlist/pre-admit")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public PreAdmitView preAdmitEmail(@Valid @RequestBody PreAdmitRequest body,
+                                      @AuthenticationPrincipal Jwt jwt,
+                                      HttpServletRequest request) {
+        String email = body.email().trim().toLowerCase();
+        PreAdmitView result = downstream.preAdmitEmail(email, actorOf(jwt));
+        if (result.admitted()) {
+            auditEventWriter.writeAllow(actorOf(jwt), ACTION_PRE_ADMIT_EMAIL, RESOURCE_USER, email,
+                    null,
+                    Map.of("email", email, "pre_admitted", true),
+                    clientIp(request));
+        }
+        return result;
+    }
+
+    /** Pending pre-admits (unconsumed, unexpired), oldest first. */
+    @GetMapping("/waitlist/pre-admits")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public List<PreAdmitEntryView> listPreAdmits() {
+        return downstream.listPreAdmits();
     }
 
     // ───────── 10. POST global pricing override ─────────

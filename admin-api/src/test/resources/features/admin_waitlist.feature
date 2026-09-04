@@ -37,3 +37,37 @@ Feature: Closed-beta waitlist admin surface (admin control plane D11)
     Then the response status is 200
     And the waitlist config reports weekly limit 100
     And the audit log has an ALLOW row for action "WAITLIST_CONFIG"
+
+  # ─────────── pre-admit by email (2026-09-03) ───────────
+
+  Scenario: a non-admin cannot pre-admit an email
+    Given a non-admin user is signed in
+    When they attempt to pre-admit the email "invitee@example.com"
+    Then the response status is 403
+
+  Scenario: a platform admin pre-admits an email; the mesh call carries the admin-api identity and is audited
+    Given a platform admin is signed in
+    When they pre-admit the email " Invitee@Example.com "
+    Then the response status is 200
+    And the pre-admit response is admitted
+    And the entitlements pre-admit call carried the service subject "service:admin_api" and email "invitee@example.com"
+    And the audit log has an ALLOW row for action "PRE_ADMIT_EMAIL"
+
+  Scenario: a rejected pre-admit is a 200 with a reason and writes no ALLOW row
+    Given a platform admin is signed in
+    And entitlements rejects pre-admits with reason "weekly_limit_reached"
+    When they pre-admit the email "invitee@example.com"
+    Then the response status is 200
+    And the pre-admit response is rejected with reason "weekly_limit_reached"
+    And the audit log has no ALLOW row for action "PRE_ADMIT_EMAIL"
+
+  Scenario: a non-admin cannot list pending pre-admits
+    Given a non-admin user is signed in
+    When they list pending pre-admits
+    Then the response status is 403
+
+  Scenario: a platform admin lists pending pre-admits
+    Given a platform admin is signed in
+    When they list pending pre-admits
+    Then the response status is 200
+    And the pending pre-admits include "pending@example.com"
