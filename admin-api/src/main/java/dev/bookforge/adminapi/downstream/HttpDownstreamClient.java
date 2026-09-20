@@ -536,6 +536,42 @@ public class HttpDownstreamClient implements DownstreamClient {
     }
 
     @Override
+    @CircuitBreaker(name = CB_BILLING, fallbackMethod = "forceResolveReversedFallback")
+    public ForceResolveReversedCallResult forceResolveReversed(AdminCommand command) {
+        Object paymentId = command.params().get("paymentId");
+        if (paymentId == null || paymentId.toString().isBlank()) {
+            return ForceResolveReversedCallResult.failed();
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("stepUpToken", command.stepUpToken());
+        body.put("staffUserId", command.staffUserId().toString());
+        if (command.targetUserId() != null) {
+            body.put("targetUserId", command.targetUserId().toString());
+        }
+        Object note = command.params().get("note");
+        if (note != null && !note.toString().isBlank()) {
+            body.put("note", note.toString());
+        }
+        String url = downstream.billingUrl() + "/internal/admin/payments/"
+                + paymentId + "/force-resolve-reversed";
+        try {
+            JsonNode json = send(url, BILLING_AUD, toJson(body), ADMIN_RPC_TIMEOUT);
+            UUID id = optionalUuid(json, "paymentId");
+            if (id == null) {
+                return ForceResolveReversedCallResult.failed();
+            }
+            return ForceResolveReversedCallResult.ok(id, json.path("restoredCents").asLong(0L));
+        } catch (DownstreamCallException e) {
+            return ForceResolveReversedCallResult.failed();
+        }
+    }
+
+    public ForceResolveReversedCallResult forceResolveReversedFallback(AdminCommand command, Throwable t) {
+        log.warn("forceResolveReversed short-circuited: {}", t.toString());
+        return ForceResolveReversedCallResult.failed();
+    }
+
+    @Override
     public AccountStatusView accountStatus(UUID userId) {
         String url = downstream.entitlementsUrl() + "/internal/admin/users/" + userId + "/status";
         JsonNode json = get(url, ENTITLEMENTS_AUD, STEP_UP_RPC_TIMEOUT);

@@ -125,6 +125,12 @@ export const api = {
         : { paymentId, amountCents, reason },
       headers: { 'X-Step-Up-Token': stepUpToken },
     }),
+  forceResolveReversed: (userId, paymentId, note, stepUpToken) =>
+    request(`/api/v1/admin/users/${userId}/payments/${paymentId}/force-resolve-reversed`, {
+      method: 'POST',
+      body: { note },
+      headers: { 'X-Step-Up-Token': stepUpToken },
+    }),
 
   // ── refund-request queue (admin-api → billing). Resolve owns a 35s budget because
   // billing fans out one 15s Paddle refund per payment; the default 12s abort would

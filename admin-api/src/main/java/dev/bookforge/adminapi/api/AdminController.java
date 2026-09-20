@@ -23,6 +23,8 @@ import dev.bookforge.adminapi.dto.OrgPricingRuleView;
 import dev.bookforge.adminapi.dto.OwnerSpendOverview;
 import dev.bookforge.adminapi.dto.PaymentHealthView;
 import dev.bookforge.adminapi.dto.PlatformAdminUpdateView;
+import dev.bookforge.adminapi.dto.ForceResolveReversedBody;
+import dev.bookforge.adminapi.dto.ForceResolveReversedView;
 import dev.bookforge.adminapi.dto.RefundReceiptView;
 import dev.bookforge.adminapi.dto.RefundRequest;
 import dev.bookforge.adminapi.dto.SetPlatformAdminRequest;
@@ -88,6 +90,7 @@ public class AdminController {
     /** audit_log.action is plain TEXT — a new action needs no migration. */
     private static final String ACTION_REFUND_REQUEST_RESOLVE = "REFUND_REQUEST_RESOLVE";
     private static final String ACTION_REFUND_RESIDUAL_SETTLE = "REFUND_RESIDUAL_SETTLE";
+    private static final String ACTION_FORCE_RESOLVE_REVERSED = "FORCE_RESOLVE_REVERSED";
     private static final String ACTION_GRANT_CREDITS = "GRANT_CREDITS";
     private static final String ACTION_SET_PLATFORM_ADMIN = "SET_PLATFORM_ADMIN";
     private static final String ACTION_UPSERT_ORG_PRICING = "UPSERT_ORG_PRICING";
@@ -437,6 +440,42 @@ public class AdminController {
         return ResponseEntity.ok(new RefundReceiptView(body.paymentId(),
                 outcome.requestedCents(), outcome.walletDebitedCents(),
                 outcome.auditEntryId(), outcome.idempotentReplay()));
+    }
+
+    /**
+     * C-17: restore wallet after Paddle refund {@code reversed}. Step-up action is {@code refund};
+     * paramsHash is {@code {paymentId, forceResolve=true, note}} so a payout token cannot match.
+     * Webhooks still do not auto-restore.
+     */
+    @PostMapping("/users/{userId}/payments/{paymentId}/force-resolve-reversed")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<Object> forceResolveReversed(
+            @PathVariable UUID userId,
+            @PathVariable UUID paymentId,
+            @Valid @RequestBody ForceResolveReversedBody body,
+            @RequestHeader(value = STEP_UP_TOKEN_HEADER, required = false) String stepUpToken,
+            @AuthenticationPrincipal Jwt jwt,
+            HttpServletRequest request) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("paymentId", paymentId.toString());
+        params.put("forceResolve", true);
+        params.put("note", body.note());
+
+        AdminCommand command = new AdminCommand(actorOf(jwt), userId,
+                STEP_UP_ACTION_REFUND, stepUpToken, params);
+        AdminService.ForceResolveOutcome outcome = adminService.forceResolveReversed(command);
+        if (!outcome.success()) {
+            return stepUpRejectionResponse(outcome.rejectionReason(), STEP_UP_ACTION_REFUND, params);
+        }
+
+        Map<String, Object> newValue = new LinkedHashMap<>();
+        newValue.put("paymentId", paymentId.toString());
+        newValue.put("restoredCents", outcome.restoredCents());
+        newValue.put("note", body.note());
+        auditEventWriter.writeAllow(actorOf(jwt), ACTION_FORCE_RESOLVE_REVERSED, RESOURCE_PAYMENT,
+                paymentId.toString(), null, newValue, clientIp(request));
+        return ResponseEntity.ok(new ForceResolveReversedView(outcome.paymentId(),
+                outcome.restoredCents()));
     }
 
     /**

@@ -5,6 +5,7 @@ import dev.bookforge.adminapi.config.DownstreamProperties;
 import dev.bookforge.adminapi.config.ServiceJwtProperties;
 import dev.bookforge.adminapi.downstream.DownstreamClient;
 import dev.bookforge.adminapi.downstream.DownstreamResult;
+import dev.bookforge.adminapi.downstream.ForceResolveReversedCallResult;
 import dev.bookforge.adminapi.downstream.HttpDownstreamClient;
 import dev.bookforge.adminapi.downstream.RefundRequestResolveResult;
 import dev.bookforge.adminapi.downstream.RefundResidualSettleResult;
@@ -136,13 +137,6 @@ public class AdminService {
     }
 
     /**
-     * Step-up-gated refund (B3) — the SINGLE refund path. Runs the same {@code runWrite(REFUND)}
-     * gate the other writes use (token signature / action / expiry / params-hash binding /
-     * single-use), then delegates to billing {@code POST /internal/refund}. On success the outcome
-     * carries the clamped ask + what was actually debited so the controller can return
-     * "asked X, refunded Y" (D / F1).
-     */
-    /**
      * Approve or reject a user-submitted refund request. Step-up gated like every other money
      * action: the token's paramsHash is bound over {requestId, decision, amountCents}, so a token
      * authorised to return $20 cannot be replayed to return $500. {@code note} is sent to billing
@@ -252,6 +246,28 @@ public class AdminService {
     }
 
     /**
+     * Restore a {@code PENDING_CARD_REFUND} after Paddle {@code reversed}. Same {@code refund}
+     * step-up action as payout, but the paramsHash includes {@code forceResolve=true} so a
+     * payout token cannot be reused. Webhooks never call this.
+     */
+    public ForceResolveOutcome forceResolveReversed(AdminCommand command) {
+        StepUpVerifier.Result gate = gate(REFUND, command);
+        if (gate instanceof StepUpVerifier.Result.Missing) {
+            return ForceResolveOutcome.rejected(REJECT_STEP_UP_REQUIRED);
+        }
+        if (!(gate instanceof StepUpVerifier.Result.Valid)) {
+            return ForceResolveOutcome.rejected(REJECT_STEP_UP_INVALID);
+        }
+        ForceResolveReversedCallResult result = callDownstream(
+                () -> downstream.forceResolveReversed(command),
+                ForceResolveReversedCallResult::failed);
+        if (!result.success()) {
+            return ForceResolveOutcome.downstreamRejected();
+        }
+        return ForceResolveOutcome.success(result.paymentId(), result.restoredCents());
+    }
+
+    /**
      * Outcome of a step-up-gated refund. On success carries the billing audit-row id and the
      * requested + actually-debited figures (D / F1). On rejection carries the mesh-standard reason
      * ({@code step_up_required} / {@code step_up_invalid}); a {@code null} reason means the
@@ -277,6 +293,25 @@ public class AdminService {
 
         static RefundOutcome downstreamRejected() {
             return new RefundOutcome(false, null, 0L, 0L, false, null);
+        }
+    }
+
+    public record ForceResolveOutcome(
+            boolean success,
+            UUID paymentId,
+            long restoredCents,
+            String rejectionReason) {
+
+        static ForceResolveOutcome success(UUID paymentId, long restoredCents) {
+            return new ForceResolveOutcome(true, paymentId, restoredCents, null);
+        }
+
+        static ForceResolveOutcome rejected(String reason) {
+            return new ForceResolveOutcome(false, null, 0L, reason);
+        }
+
+        static ForceResolveOutcome downstreamRejected() {
+            return new ForceResolveOutcome(false, null, 0L, null);
         }
     }
 

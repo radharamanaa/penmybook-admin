@@ -65,6 +65,13 @@ public interface DownstreamClient {
      */
     DownstreamResult refund(AdminCommand command);
 
+    /**
+     * billing {@code POST /internal/admin/payments/{paymentId}/force-resolve-reversed}.
+     * Step-up action is still {@code refund}; params must include {@code forceResolve=true}
+     * so a payout token cannot be replayed. Does not auto-fire from a webhook.
+     */
+    ForceResolveReversedCallResult forceResolveReversed(AdminCommand command);
+
     /** read-through account status for the target user (entitlements admin profile). */
     AccountStatusView accountStatus(UUID userId);
 

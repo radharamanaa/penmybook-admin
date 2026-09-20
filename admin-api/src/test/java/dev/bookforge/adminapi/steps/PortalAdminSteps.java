@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.patchRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
@@ -208,6 +209,62 @@ public class PortalAdminSteps {
         params.put("refundAmountCents", refundAmountCents);
         String paramsHash = paramsHasher.compute("refund", staffUserId, TARGET_USER, params);
         return StepUpTokenMinter.validFor("refund", paramsHash);
+    }
+
+    // ───────── When — force-resolve reversed ─────────
+
+    @When("they attempt to force-resolve a reversed payment")
+    public void attemptForceResolveReversed() {
+        lastResponse = forceResolveCall(FIXED_PAYMENT, "Paddle dashboard confirmed reversed", false);
+    }
+
+    @When("they force-resolve a reversed payment")
+    public void doForceResolveReversed() {
+        lastResponse = forceResolveCall(FIXED_PAYMENT, "Paddle dashboard confirmed reversed", true);
+    }
+
+    @When("they force-resolve a reversed payment using a payout token")
+    public void forceResolveWithPayoutToken() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("note", "Paddle dashboard confirmed reversed");
+        lastResponse = sendWithStepUp(HttpMethod.POST,
+                "/v1/admin/users/" + TARGET_USER + "/payments/" + FIXED_PAYMENT
+                        + "/force-resolve-reversed",
+                body, boundRefundToken(FIXED_PAYMENT, 2500L));
+    }
+
+    private ResponseEntity<String> forceResolveCall(UUID paymentId, String note, boolean withBoundToken) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("note", note);
+        String stepUpToken = null;
+        if (withBoundToken && callerIsAdmin) {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("paymentId", paymentId.toString());
+            params.put("forceResolve", true);
+            params.put("note", note);
+            String paramsHash = paramsHasher.compute("refund", staffUserId, TARGET_USER, params);
+            stepUpToken = StepUpTokenMinter.validFor("refund", paramsHash);
+        }
+        return sendWithStepUp(HttpMethod.POST,
+                "/v1/admin/users/" + TARGET_USER + "/payments/" + paymentId
+                        + "/force-resolve-reversed",
+                body, stepUpToken);
+    }
+
+    @And("a force-resolve receipt is returned")
+    public void forceResolveReceiptReturned() {
+        JsonNode body = parseBody();
+        assertThat(body.path("paymentId").asText()).isNotEmpty();
+        assertThat(body.path("restoredCents").asLong()).isGreaterThanOrEqualTo(0L);
+        AdminWireMock.server().verify(postRequestedFor(
+                urlPathMatching("/internal/admin/payments/[a-fA-F0-9-]{36}/force-resolve-reversed"))
+                .withRequestBody(matchingJsonPath("$.targetUserId", equalTo(TARGET_USER.toString()))));
+    }
+
+    @And("billing was not asked to force-resolve")
+    public void billingNotAskedToForceResolve() {
+        AdminWireMock.server().verify(0, postRequestedFor(
+                urlPathMatching("/internal/admin/payments/[a-fA-F0-9-]{36}/force-resolve-reversed")));
     }
 
     // ───────── When — resolve a user's refund request ─────────
@@ -982,6 +1039,9 @@ public class PortalAdminSteps {
                     postRequestedFor(urlMatching("/internal/wallet/credit")));
             case "REFUND" -> AdminWireMock.server().verify(0,
                     postRequestedFor(urlMatching("/internal/refund")));
+            case "FORCE_RESOLVE_REVERSED" -> AdminWireMock.server().verify(0,
+                    postRequestedFor(urlPathMatching(
+                            "/internal/admin/payments/[a-fA-F0-9-]{36}/force-resolve-reversed")));
             case "GRANT_CREDITS" -> AdminWireMock.server().verify(0,
                     postRequestedFor(urlMatching("/internal/admin/grant_credit")));
             case "SET_PLATFORM_ADMIN" -> AdminWireMock.server().verify(0,

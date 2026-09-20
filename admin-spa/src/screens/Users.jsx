@@ -3,12 +3,13 @@ import { useSearchParams } from 'react-router-dom'
 import { api } from '../api.js'
 
 /**
- * User search + money ops. Grant/refund are OTP step-up gated (D6): start a
+ * User search + money ops. Grant/refund/restore-reversed are OTP step-up gated (D6): start a
  * challenge, type the emailed code (dev: read from otp_challenges), the minted
  * single-use token authorises exactly this action + params.
  *
  * Queue payout is a deep-link: `/users?refundRequestId=&ownerType=&ownerId=&ownerEmail=&paymentId=`.
  * When an APPROVED request id is present it is bound into the OTP and forwarded to billing.
+ * Restore after Paddle reversed uses the same {@code refund} OTP action with {@code forceResolve}.
  */
 export default function Users() {
   const [searchParams] = useSearchParams()
@@ -127,6 +128,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
   const [refundPayment, setRefundPayment] = useState(initialPaymentId)
   const [refundCents, setRefundCents] = useState('')
   const [refundRequestId, setRefundRequestId] = useState(initialRefundRequestId)
+  const [reverseNote, setReverseNote] = useState('')
   // OTP flow state: which action is mid-challenge + the challenge id + code.
   const [otp, setOtp] = useState(null) // {action, challengeId, params}
   const [code, setCode] = useState('')
@@ -149,6 +151,10 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
       } else if (otp.action === 'wallet_top_up') {
         await api.walletTopUp(user.userId, otp.params.amountCents, 'admin top-up', v.stepUpToken)
         onDone(`Topped up ${otp.params.amountCents}¢ for ${user.email}`)
+      } else if (otp.params.forceResolve) {
+        const r = await api.forceResolveReversed(
+          user.userId, otp.params.paymentId, otp.params.note, v.stepUpToken)
+        onDone(`Restored ${r.restoredCents}¢ to wallet for payment ${otp.params.paymentId}. Card is unchanged.`)
       } else {
         await api.refund(user.userId, otp.params.paymentId, otp.params.refundAmountCents,
           'admin refund', v.stepUpToken, otp.params.refundRequestId)
@@ -222,6 +228,28 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
       <p className="sub">
         Uses live remaining on the payment. Leftover promo inside remaining can ride the
         Paddle refund.
+      </p>
+
+      <div className="row" style={{ marginTop: 14 }}>
+        <div>
+          <label htmlFor="reverse-note">Restore after Paddle reversed (payment ID above)</label>
+          <input id="reverse-note" value={reverseNote}
+                 onChange={(e) => setReverseNote(e.target.value)}
+                 placeholder="Paddle adjustment id / dashboard confirmed reverse" />
+        </div>
+        <button disabled={!refundPayment || reverseNote.trim().length < 8}
+                onClick={() => startOtp('refund', {
+                  paymentId: refundPayment,
+                  forceResolve: true,
+                  note: reverseNote.trim(),
+                })}>
+          Start OTP restore (reversed)
+        </button>
+      </div>
+      <p className="sub">
+        Does not credit the card. Only restores the wallet after you have confirmed in Paddle
+        that this refund adjustment is reversed. If the card refund still stands, this donates
+        the claw. Webhooks never auto-restore.
       </p>
 
       {otp && (

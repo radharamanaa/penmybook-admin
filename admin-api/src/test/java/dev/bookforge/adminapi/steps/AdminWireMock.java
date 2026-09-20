@@ -64,6 +64,7 @@ public class AdminWireMock {
         server.resetAll();
         stubEntitlementsAdmin();
         stubBillingRefund();
+        stubBillingForceResolveReversed();
         stubAccountStatus();
         stubOrgView();
         // Phase 3b — admin-portal HTTP surface ↓
@@ -125,6 +126,16 @@ public class AdminWireMock {
                         .withBody("{\"success\":true,\"requestedCents\":2500,\"walletDebitedCents\":2500,"
                                 + "\"auditRecorded\":true,\"idempotentReplay\":false,"
                                 + "\"auditEntryId\":\"" + UUID.randomUUID() + "\"}")));
+    }
+
+    private static void stubBillingForceResolveReversed() {
+        server.stubFor(post(urlPathMatching(
+                "/internal/admin/payments/[a-fA-F0-9-]{36}/force-resolve-reversed"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"paymentId\":\"" + UUID.randomUUID()
+                                + "\",\"restoredCents\":2500}")));
     }
 
     private static void stubAccountStatus() {
