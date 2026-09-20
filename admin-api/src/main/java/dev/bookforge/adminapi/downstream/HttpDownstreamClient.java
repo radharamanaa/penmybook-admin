@@ -495,6 +495,7 @@ public class HttpDownstreamClient implements DownstreamClient {
         body.put("refundAmountCents", command.params().get("refundAmountCents"));
         body.put("stepUpToken", command.stepUpToken());
         body.put("staffUserId", command.staffUserId().toString());
+        body.put("targetUserId", command.targetUserId().toString());
         // H2 fix — the idempotencyKey MUST be STABLE across retries of the SAME refund operation
         // (RefundRequest contract: "the saga reuses the original challenge id on retry"). The prior
         // code minted a FRESH UUID.randomUUID() per call, so a retry of one operation reached billing

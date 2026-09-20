@@ -38,9 +38,9 @@ import java.util.function.Supplier;
  *   <li>verifies the token's {@code paramsHash} matches the canonical hash of THIS command's
  *       params (binds the token to the exact action body the user authorized — defense-in-depth
  *       on top of the downstream's own check);</li>
- *   <li>atomically marks the token's {@code challengeId} as consumed and rejects on replay
- *       within the token's TTL (closes the in-TTL replay window before issuing any downstream
- *       call);</li>
+ *   <li>for grant / top-up / resolve, atomically marks the challenge consumed here; for
+ *       {@code refund} (payout and force-resolve) billing's {@code step_up_consumption} is the
+ *       single-use ledger so a 502 cannot leave a leftover spendable at {@code /internal/**};</li>
  *   <li>delegates the state change to the downstream callee (entitlements {@code /internal/admin/*}
  *       or billing {@code /internal/refund}), which performs the change AND its audit row in one
  *       transaction;</li>
@@ -421,11 +421,13 @@ public class AdminService {
             return new StepUpVerifier.Result.Invalid();
         }
 
-        // Single-use: claim the challenge id atomically. A second presentation of the same token
-        // within its TTL loses the race and is rejected as a replay — BEFORE any downstream call
-        // fires.
-        if (!tokenStore.markConsumedOnce(valid.challengeId(), valid.expiresAtEpoch())) {
-            return new StepUpVerifier.Result.Invalid();
+        // Billing spends the same token in step_up_consumption (refund + force-resolve). Claiming
+        // here first left a leftover spendable at billing after a 502 (G1). Grant / resolve /
+        // top-up still claim locally because those callees do not spend the full token.
+        if (!REFUND.equals(action)) {
+            if (!tokenStore.markConsumedOnce(valid.challengeId(), valid.expiresAtEpoch())) {
+                return new StepUpVerifier.Result.Invalid();
+            }
         }
         return valid;
     }
