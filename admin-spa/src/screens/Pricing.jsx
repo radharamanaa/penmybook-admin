@@ -123,7 +123,7 @@ export default function Pricing() {
                       {current == null ? '…' : dollars(v)}
                     </td>
                     <td>
-                      <input type="number" min="0" max="100000" step="1"
+                      <input type="number" inputMode="numeric" min="0" max="100000" step="1"
                              className={changed ? 'dirty' : ''}
                              value={current == null ? '' : v}
                              onChange={(e) => setDrafts({ ...drafts, [a.value]: e.target.value })}

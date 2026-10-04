@@ -147,7 +147,7 @@ export default function Waitlist() {
         <div className="row">
           <div>
             <label htmlFor="limit">Weekly approval limit</label>
-            <input id="limit" type="number" min="0" value={limitDraft}
+            <input id="limit" type="number" inputMode="numeric" min="0" value={limitDraft}
                    className={limitDraft !== String(config.weeklyApprovalLimit) ? 'dirty' : ''}
                    onChange={(e) => setLimitDraft(e.target.value)} />
           </div>

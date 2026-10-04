@@ -121,7 +121,7 @@ export default function ConfigSection() {
     // Raw string is stored so decimals type cleanly; coerced to a number at save.
     if (meta.type === 'number') {
       return (
-        <input type="number" className={dirty}
+        <input type="number" inputMode="decimal" className={dirty}
                min={meta.min} max={meta.max} step="0.01"
                value={value ?? ''}
                onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} />

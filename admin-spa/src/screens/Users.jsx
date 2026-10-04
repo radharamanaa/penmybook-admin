@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api.js'
+import { useScrollIntoViewOnPhone } from '../useScrollIntoViewOnPhone.js'
 
 /**
  * User search + money ops. Grant/refund/restore-reversed are OTP step-up gated (D6): start a
@@ -28,6 +29,8 @@ export default function Users() {
       : null
   ))
   const [error, setError] = useState(null)
+  const actionsRef = useRef(null)
+  useScrollIntoViewOnPhone(actionsRef, selected)
   const [ok, setOk] = useState(null)
 
   async function search(e) {
@@ -112,12 +115,14 @@ export default function Users() {
       )}
 
       {selected && (
-        <UserActions user={selected}
-                     initialPaymentId={linkedPaymentId}
-                     initialRefundRequestId={linkedRequestId}
-                     refundRequestIdReadOnly={Boolean(linkedRequestId)}
-                     onDone={(msg) => { setOk(msg); setError(null) }}
-                     onError={(msg) => { setError(msg); setOk(null) }} />
+        <div ref={actionsRef}>
+          <UserActions user={selected}
+                       initialPaymentId={linkedPaymentId}
+                       initialRefundRequestId={linkedRequestId}
+                       refundRequestIdReadOnly={Boolean(linkedRequestId)}
+                       onDone={(msg) => { setOk(msg); setError(null) }}
+                       onError={(msg) => { setError(msg); setOk(null) }} />
+        </div>
       )}
     </>
   )
@@ -180,7 +185,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
       <div className="row">
         <div>
           <label>Wallet top-up (cents) — OTP required</label>
-          <input type="number" min="1" value={topUp} onChange={(e) => setTopUp(e.target.value)} />
+          <input type="number" inputMode="numeric" min="1" value={topUp} onChange={(e) => setTopUp(e.target.value)} />
         </div>
         <button disabled={!topUp}
                 onClick={() => startOtp('wallet_top_up', { amountCents: Number(topUp) })}>
@@ -191,7 +196,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
       <div className="row">
         <div>
           <label>Grant credits (cents) — OTP required</label>
-          <input type="number" min="1" value={grant} onChange={(e) => setGrant(e.target.value)} />
+          <input type="number" inputMode="numeric" min="1" value={grant} onChange={(e) => setGrant(e.target.value)} />
         </div>
         <button disabled={!grant}
                 onClick={() => startOtp('grant_credit', { amountCents: Number(grant) })}>
@@ -207,7 +212,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
         </div>
         <div>
           <label htmlFor="refund-cents">Refund amount (cents)</label>
-          <input id="refund-cents" type="number" min="1" value={refundCents}
+          <input id="refund-cents" type="number" inputMode="numeric" min="1" value={refundCents}
                  onChange={(e) => setRefundCents(e.target.value)} />
         </div>
         <div>
@@ -258,7 +263,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
         <div className="row" style={{ marginTop: 14 }}>
           <div>
             <label htmlFor="otp-code">OTP code for <code>{otp.action}</code> (check email / dev DB)</label>
-            <input id="otp-code" value={code} onChange={(e) => setCode(e.target.value)} maxLength={6} />
+            <input id="otp-code" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} maxLength={6} />
           </div>
           <button disabled={code.length < 6} onClick={verifyAndExecute}>Verify & execute</button>
           <button className="ghost" onClick={() => setOtp(null)}>Cancel</button>

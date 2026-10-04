@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api.js'
+import { useScrollIntoViewOnPhone } from '../useScrollIntoViewOnPhone.js'
 
 function fmtDate(value) {
   if (!value) return '—'
@@ -22,6 +23,8 @@ export default function Feedback() {
   const [resolveNote, setResolveNote] = useState('')
   const [resolveBusy, setResolveBusy] = useState(false)
   const thumbUrlsRef = useRef({})
+  const resolveRef = useRef(null)
+  useScrollIntoViewOnPhone(resolveRef, resolveId)
 
   const revokeAllThumbs = useCallback(() => {
     for (const url of Object.values(thumbUrlsRef.current)) {
@@ -196,7 +199,7 @@ export default function Feedback() {
       )}
 
       {resolveId && (
-        <div className="panel" style={{ marginTop: 16, maxWidth: 480 }}>
+        <div ref={resolveRef} className="panel" style={{ marginTop: 16, maxWidth: 480 }}>
           <h2 style={{ fontSize: 16, marginTop: 0 }}>Resolve feedback</h2>
           <p className="sub mono">{resolveId}</p>
           <label htmlFor="resolve-note">Resolution note</label>

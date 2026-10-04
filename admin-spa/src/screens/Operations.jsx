@@ -82,7 +82,7 @@ export default function Operations() {
         <div className="row">
           <div>
             <label htmlFor="cap">Max concurrent generations (1–50)</label>
-            <input id="cap" type="number" min="1" max="50" value={cap}
+            <input id="cap" type="number" inputMode="numeric" min="1" max="50" value={cap}
                    className={cap !== String(settings.max_concurrent_generations) ? 'dirty' : ''}
                    onChange={(e) => setCap(e.target.value)} />
           </div>

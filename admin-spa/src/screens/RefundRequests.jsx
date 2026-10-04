@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api.js'
+import { useScrollIntoViewOnPhone } from '../useScrollIntoViewOnPhone.js'
 
 const STATUSES = [
   'PENDING', 'APPROVED', 'PAYING', 'SETTLED', 'REJECTED', 'WITHDRAWN',
@@ -56,6 +57,8 @@ export default function RefundRequests() {
   const [code, setCode] = useState('')
   const [note, setNote] = useState('')
   const [amountDraft, setAmountDraft] = useState('')
+  const confirmRef = useRef(null)
+  useScrollIntoViewOnPhone(confirmRef, otp)
 
   const load = useCallback(async () => {
     setError(null)
@@ -324,7 +327,7 @@ export default function RefundRequests() {
       ) : null}
 
       {otp && otp.kind === 'resolve' && (
-        <div className="panel" style={{ marginTop: 16 }}>
+        <div ref={confirmRef} className="panel" style={{ marginTop: 16 }}>
           <h2 style={{ marginTop: 0 }}>
             Confirm {otp.params.decision.toLowerCase()} for <code>{otp.params.requestId}</code>
           </h2>
@@ -354,7 +357,8 @@ export default function RefundRequests() {
             </div>
             <div>
               <label>OTP code (check email / dev DB)</label>
-              <input value={code} onChange={(e) => setCode(e.target.value)} maxLength={6} />
+              <input value={code} inputMode="numeric" autoComplete="one-time-code"
+                     onChange={(e) => setCode(e.target.value)} maxLength={6} />
             </div>
           </div>
           <div className="row">
@@ -371,7 +375,7 @@ export default function RefundRequests() {
       )}
 
       {otp && otp.kind === 'settle' && (
-        <div className="panel" style={{ marginTop: 16 }}>
+        <div ref={confirmRef} className="panel" style={{ marginTop: 16 }}>
           <h2 style={{ marginTop: 0 }}>
             Confirm settle for <code>{otp.params.residualId}</code>
           </h2>
@@ -382,7 +386,8 @@ export default function RefundRequests() {
           <div className="row">
             <div>
               <label>OTP code (check email / dev DB)</label>
-              <input value={code} onChange={(e) => setCode(e.target.value)} maxLength={6} />
+              <input value={code} inputMode="numeric" autoComplete="one-time-code"
+                     onChange={(e) => setCode(e.target.value)} maxLength={6} />
             </div>
           </div>
           <div className="row">
@@ -399,6 +404,7 @@ export default function RefundRequests() {
           <label>Approval amount (cents; leave blank for everything currently refundable)</label>
           <input
             type="number"
+            inputMode="numeric"
             min="1"
             value={amountDraft}
             onChange={(e) => setAmountDraft(e.target.value)}
