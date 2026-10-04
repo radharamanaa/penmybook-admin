@@ -111,13 +111,15 @@ export default function Operations() {
               <div className="stat-label">processing</div></div>
           </div>
           <h2>Books by lifecycle status</h2>
-          <table>
-            <tbody>
-              {Object.entries(status.counts_by_status ?? {}).map(([k, v]) => (
-                <tr key={k}><td className="mono">{k}</td><td>{v}</td></tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table>
+              <tbody>
+                {Object.entries(status.counts_by_status ?? {}).map(([k, v]) => (
+                  <tr key={k}><td className="mono">{k}</td><td>{v}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </>

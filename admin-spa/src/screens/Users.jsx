@@ -86,26 +86,28 @@ export default function Users() {
 
       {results.length > 0 && (
         <div className="panel">
-          <table>
-            <thead>
-              <tr><th>Email</th><th>Status</th><th>User ID</th><th /></tr>
-            </thead>
-            <tbody>
-              {results.map((u) => (
-                <tr key={u.userId}>
-                  <td>{u.email}</td>
-                  <td>{statusBadge(u.accountStatus)}</td>
-                  <td className="mono">{u.userId}</td>
-                  <td>
-                    {u.accountStatus === 'WAITLISTED' && (
-                      <button className="small" onClick={() => admit(u)}>Admit</button>
-                    )}{' '}
-                    <button className="small ghost" onClick={() => setSelected(u)}>Manage</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table className="cards" role="table">
+              <thead role="rowgroup">
+                <tr role="row"><th role="columnheader">Email</th><th role="columnheader">Status</th><th role="columnheader">User ID</th><th role="columnheader" /></tr>
+              </thead>
+              <tbody role="rowgroup">
+                {results.map((u) => (
+                  <tr role="row" key={u.userId}>
+                    <td role="cell" data-label="Email">{u.email}</td>
+                    <td role="cell" data-label="Status">{statusBadge(u.accountStatus)}</td>
+                    <td role="cell" data-label="User ID" className="mono">{u.userId}</td>
+                    <td role="cell">
+                      {u.accountStatus === 'WAITLISTED' && (
+                        <button className="small" onClick={() => admit(u)}>Admit</button>
+                      )}{' '}
+                      <button className="small ghost" onClick={() => setSelected(u)}>Manage</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

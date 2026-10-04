@@ -29,26 +29,28 @@ export default function SystemView() {
         section (see docs/admin-control-plane/PARAMETERS.md) changes via deploy.
       </p>
       <div className="panel">
-        <table>
-          <thead><tr><th>Parameter</th><th>Effective value</th><th>Source</th></tr></thead>
-          <tbody>
-            {keys.map((k) => {
-              const overridden = overrides[k] !== undefined
-              const value = overridden ? overrides[k] : defaults[k]
-              return (
-                <tr key={k}>
-                  <td><code>{k}</code></td>
-                  <td className="mono">{value === null || value === undefined ? '—' : String(value)}</td>
-                  <td>
-                    <span className={`badge ${overridden ? 'on' : 'neutral'}`}>
-                      {overridden ? 'admin override' : 'env default'}
-                    </span>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Parameter</th><th>Effective value</th><th>Source</th></tr></thead>
+            <tbody>
+              {keys.map((k) => {
+                const overridden = overrides[k] !== undefined
+                const value = overridden ? overrides[k] : defaults[k]
+                return (
+                  <tr key={k}>
+                    <td><code>{k}</code></td>
+                    <td className="mono">{value === null || value === undefined ? '—' : String(value)}</td>
+                    <td>
+                      <span className={`badge ${overridden ? 'on' : 'neutral'}`}>
+                        {overridden ? 'admin override' : 'env default'}
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </>
   )

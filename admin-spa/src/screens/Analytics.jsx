@@ -216,55 +216,59 @@ export default function Analytics() {
             <p className="sub">
               Legacy finished without a stamp: {genreCounts.legacy_finished_unreliable} (unreliable — not in the finished series).
             </p>
-            <table>
-              <thead>
-                <tr>
-                  <th>Genre</th>
-                  <th>Started today (UTC)</th>
-                  <th>Finished today (UTC)</th>
-                  <th>Started this week (UTC)</th>
-                  <th>Finished this week (UTC)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {GENRE_ORDER.map((g) => (
-                  <tr key={g}>
-                    <td>{GENRE_LABELS[g]}</td>
-                    <td>{genreCounts.today?.started?.[g] ?? 0}</td>
-                    <td>{genreCounts.today?.finished?.[g] ?? 0}</td>
-                    <td>{genreCounts.this_week?.started?.[g] ?? 0}</td>
-                    <td>{genreCounts.this_week?.finished?.[g] ?? 0}</td>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Genre</th>
+                    <th>Started today (UTC)</th>
+                    <th>Finished today (UTC)</th>
+                    <th>Started this week (UTC)</th>
+                    <th>Finished this week (UTC)</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {GENRE_ORDER.map((g) => (
+                    <tr key={g}>
+                      <td>{GENRE_LABELS[g]}</td>
+                      <td>{genreCounts.today?.started?.[g] ?? 0}</td>
+                      <td>{genreCounts.today?.finished?.[g] ?? 0}</td>
+                      <td>{genreCounts.this_week?.started?.[g] ?? 0}</td>
+                      <td>{genreCounts.this_week?.finished?.[g] ?? 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             <h3>Last {genreCounts.n} ISO weeks (UTC Monday–Sunday)</h3>
-            <table>
-              <thead>
-                <tr>
-                  <th>Week start (UTC)</th>
-                  {GENRE_ORDER.map((g) => (
-                    <th key={`s-${g}`}>{GENRE_LABELS[g]} started</th>
-                  ))}
-                  {GENRE_ORDER.map((g) => (
-                    <th key={`f-${g}`}>{GENRE_LABELS[g]} finished</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {(genreCounts.weeks ?? []).map((w) => (
-                  <tr key={w.week_start}>
-                    <td className="mono">{w.week_start}</td>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Week start (UTC)</th>
                     {GENRE_ORDER.map((g) => (
-                      <td key={`s-${w.week_start}-${g}`}>{w.started?.[g] ?? 0}</td>
+                      <th key={`s-${g}`}>{GENRE_LABELS[g]} started</th>
                     ))}
                     {GENRE_ORDER.map((g) => (
-                      <td key={`f-${w.week_start}-${g}`}>{w.finished?.[g] ?? 0}</td>
+                      <th key={`f-${g}`}>{GENRE_LABELS[g]} finished</th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {(genreCounts.weeks ?? []).map((w) => (
+                    <tr key={w.week_start}>
+                      <td className="mono">{w.week_start}</td>
+                      {GENRE_ORDER.map((g) => (
+                        <td key={`s-${w.week_start}-${g}`}>{w.started?.[g] ?? 0}</td>
+                      ))}
+                      {GENRE_ORDER.map((g) => (
+                        <td key={`f-${w.week_start}-${g}`}>{w.finished?.[g] ?? 0}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </>
         )}
       </div>
@@ -285,45 +289,47 @@ export default function Analytics() {
             Charges lookup failed — showing $0.00 billed (entitlements may be down).
           </div>
         )}
-        <table>
-          <thead>
-            <tr>
-              <th>Book</th>
-              <th>Status</th>
-              <th>Created</th>
-              <th>Customer: generate</th>
-              <th>Customer: edit</th>
-              <th>Customer: extend</th>
-              <th>Customer: publish</th>
-              <th>Customer: other</th>
-              <th>Customer total</th>
-              <th>COGS (tokens)</th>
-              <th>Δ (charges − cost)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {bookRows.length === 0 ? (
-              <tr><td colSpan={11} className="sub">No books in this period.</td></tr>
-            ) : bookRows.map((row) => (
-              <tr key={row.book_id}>
-                <td>
-                  <div>{row.book_title || '(untitled)'}</div>
-                  <div className="mono sub">{row.book_id}</div>
-                </td>
-                <td className="mono">{row.status}</td>
-                <td>{row.created_at ? row.created_at.slice(0, 10) : '—'}</td>
-                <td>{fmtUsd(row.generationCents)}</td>
-                <td>{fmtUsd(row.editCents)}</td>
-                <td>{fmtUsd(row.extendCents)}</td>
-                <td>{fmtUsd(row.publishCents)}</td>
-                <td>{fmtUsd(row.otherCents)}</td>
-                <td>{fmtUsd(row.chargedCents)}</td>
-                <td>{fmtUsd(row.costCents)}</td>
-                <td>{fmtUsd(row.deltaCents)}</td>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Book</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Customer: generate</th>
+                <th>Customer: edit</th>
+                <th>Customer: extend</th>
+                <th>Customer: publish</th>
+                <th>Customer: other</th>
+                <th>Customer total</th>
+                <th>COGS (tokens)</th>
+                <th>Δ (charges − cost)</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {bookRows.length === 0 ? (
+                <tr><td colSpan={11} className="sub">No books in this period.</td></tr>
+              ) : bookRows.map((row) => (
+                <tr key={row.book_id}>
+                  <td>
+                    <div>{row.book_title || '(untitled)'}</div>
+                    <div className="mono sub">{row.book_id}</div>
+                  </td>
+                  <td className="mono">{row.status}</td>
+                  <td>{row.created_at ? row.created_at.slice(0, 10) : '—'}</td>
+                  <td>{fmtUsd(row.generationCents)}</td>
+                  <td>{fmtUsd(row.editCents)}</td>
+                  <td>{fmtUsd(row.extendCents)}</td>
+                  <td>{fmtUsd(row.publishCents)}</td>
+                  <td>{fmtUsd(row.otherCents)}</td>
+                  <td>{fmtUsd(row.chargedCents)}</td>
+                  <td>{fmtUsd(row.costCents)}</td>
+                  <td>{fmtUsd(row.deltaCents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {bookTotal > 20 && (
           <div className="row" style={{ marginTop: 12, gap: 8, alignItems: 'center' }}>
             <button type="button" disabled={bookPage <= 1}

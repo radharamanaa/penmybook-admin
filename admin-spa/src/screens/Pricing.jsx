@@ -107,32 +107,34 @@ export default function Pricing() {
                  value={orgId} onChange={(e) => setOrgId(e.target.value)} />
         </div>
 
-        <table>
-          <thead>
-            <tr><th>Action</th><th>Price</th><th style={{ width: 170 }}>Cents</th></tr>
-          </thead>
-          <tbody>
-            {ACTIONS.map((a) => {
-              const v = centsFor(a.value)
-              const changed = rowChanged(a.value)
-              return (
-                <tr key={a.value}>
-                  <td>{a.label}</td>
-                  <td style={changed ? { color: 'var(--accent)', fontWeight: 600 } : undefined}>
-                    {current == null ? '…' : dollars(v)}
-                  </td>
-                  <td>
-                    <input type="number" min="0" max="100000" step="1"
-                           className={changed ? 'dirty' : ''}
-                           value={current == null ? '' : v}
-                           onChange={(e) => setDrafts({ ...drafts, [a.value]: e.target.value })}
-                           style={{ maxWidth: 140 }} />
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Action</th><th>Price</th><th style={{ width: 170 }}>Cents</th></tr>
+            </thead>
+            <tbody>
+              {ACTIONS.map((a) => {
+                const v = centsFor(a.value)
+                const changed = rowChanged(a.value)
+                return (
+                  <tr key={a.value}>
+                    <td>{a.label}</td>
+                    <td style={changed ? { color: 'var(--accent)', fontWeight: 600 } : undefined}>
+                      {current == null ? '…' : dollars(v)}
+                    </td>
+                    <td>
+                      <input type="number" min="0" max="100000" step="1"
+                             className={changed ? 'dirty' : ''}
+                             value={current == null ? '' : v}
+                             onChange={(e) => setDrafts({ ...drafts, [a.value]: e.target.value })}
+                             style={{ maxWidth: 140 }} />
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
 
         <p className="sub" style={{ fontSize: '0.78rem', margin: '10px 0 14px' }}>
           {orgId.trim()

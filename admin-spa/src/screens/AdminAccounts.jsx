@@ -70,22 +70,24 @@ export default function AdminAccounts() {
       {ok && <div className="msg ok">{ok}</div>}
 
       <div className="panel">
-        <table>
-          <thead><tr><th>Email</th><th>Created</th><th /></tr></thead>
-          <tbody>
-            {admins.map((a) => (
-              <tr key={a.admin_uuid}>
-                <td>{a.email}</td>
-                <td className="mono">{a.created_at}</td>
-                <td>
-                  <button className="small ghost" onClick={() => resetPassword(a)}>Reset password</button>{' '}
-                  <button className="small danger" onClick={() => remove(a)}
-                          disabled={admins.length <= 1}>Remove</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Email</th><th>Created</th><th /></tr></thead>
+            <tbody>
+              {admins.map((a) => (
+                <tr key={a.admin_uuid}>
+                  <td>{a.email}</td>
+                  <td className="mono">{a.created_at}</td>
+                  <td>
+                    <button className="small ghost" onClick={() => resetPassword(a)}>Reset password</button>{' '}
+                    <button className="small danger" onClick={() => remove(a)}
+                            disabled={admins.length <= 1}>Remove</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <form className="panel" onSubmit={create}>

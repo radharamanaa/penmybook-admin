@@ -25,29 +25,31 @@ export default function Audit() {
       </p>
       {error && <div className="msg error">{error}</div>}
       <div className="panel">
-        <table>
-          <thead>
-            <tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th>Outcome</th><th>Change</th></tr>
-          </thead>
-          <tbody>
-            {entries.map((e, i) => (
-              <tr key={i}>
-                <td className="mono">{e.ts}</td>
-                <td>{e.actor_email}</td>
-                <td><code>{e.action}</code></td>
-                <td className="mono">{e.target}</td>
-                <td>
-                  <span className={`badge ${e.outcome === 'allow' ? 'on' : 'off'}`}>{e.outcome}</span>
-                </td>
-                <td className="mono" style={{ maxWidth: 320, overflowWrap: 'anywhere' }}>
-                  {e.old || e.new
-                    ? `${JSON.stringify(e.old ?? {})} → ${JSON.stringify(e.new ?? {})}`
-                    : e.detail}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th>Outcome</th><th>Change</th></tr>
+            </thead>
+            <tbody>
+              {entries.map((e, i) => (
+                <tr key={i}>
+                  <td className="mono">{e.ts}</td>
+                  <td>{e.actor_email}</td>
+                  <td><code>{e.action}</code></td>
+                  <td className="mono">{e.target}</td>
+                  <td>
+                    <span className={`badge ${e.outcome === 'allow' ? 'on' : 'off'}`}>{e.outcome}</span>
+                  </td>
+                  <td className="mono" style={{ maxWidth: 320, overflowWrap: 'anywhere' }}>
+                    {e.old || e.new
+                      ? `${JSON.stringify(e.old ?? {})} → ${JSON.stringify(e.new ?? {})}`
+                      : e.detail}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </>
   )

@@ -67,26 +67,28 @@ function FormatSpendPanel({ title, usage, byAction }) {
         that publish action (gross, before refunds). A book in two formats
         counts in both rows; a $0 digital first-publish still counts as a book.
       </p>
-      <table>
-        <thead>
-          <tr>
-            <th>Format</th>
-            <th>Books</th>
-            <th>Charges</th>
-            <th>Customer $</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.label}>
-              <td>{row.label}</td>
-              <td>{fmtCount(row.books)}</td>
-              <td>{fmtCount(row.chargeCount)}</td>
-              <td>{fmtUsd(row.spentCents)}</td>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Format</th>
+              <th>Books</th>
+              <th>Charges</th>
+              <th>Customer $</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.label}>
+                <td>{row.label}</td>
+                <td>{fmtCount(row.books)}</td>
+                <td>{fmtCount(row.chargeCount)}</td>
+                <td>{fmtUsd(row.spentCents)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -96,20 +98,22 @@ function ByActionPanel({ byAction }) {
   return (
     <div className="panel">
       <h2 style={{ marginTop: 0 }}>Spend by action</h2>
-      <table>
-        <thead>
-          <tr><th>Action</th><th>Charges</th><th>Spent (gross)</th></tr>
-        </thead>
-        <tbody>
-          {byAction.map((row) => (
-            <tr key={row.action}>
-              <td className="mono">{row.action?.toLowerCase().replaceAll('_', ' ')}</td>
-              <td>{fmtCount(row.chargeCount)}</td>
-              <td>{fmtUsd(row.spentCents)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Action</th><th>Charges</th><th>Spent (gross)</th></tr>
+          </thead>
+          <tbody>
+            {byAction.map((row) => (
+              <tr key={row.action}>
+                <td className="mono">{row.action?.toLowerCase().replaceAll('_', ' ')}</td>
+                <td>{fmtCount(row.chargeCount)}</td>
+                <td>{fmtUsd(row.spentCents)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -126,20 +130,22 @@ function FlowsPanel({ flows }) {
     <div className="panel">
       <h2 style={{ marginTop: 0 }}>Money flows</h2>
       <p className="sub">Wallet money loaded vs spent per rolling window (refunds excluded from both).</p>
-      <table>
-        <thead>
-          <tr><th>Window</th><th>Loaded</th><th>Spent</th></tr>
-        </thead>
-        <tbody>
-          {rows.map(([label, loaded, spent]) => (
-            <tr key={label}>
-              <td>{label}</td>
-              <td>{fmtUsd(loaded)}</td>
-              <td>{fmtUsd(spent)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Window</th><th>Loaded</th><th>Spent</th></tr>
+          </thead>
+          <tbody>
+            {rows.map(([label, loaded, spent]) => (
+              <tr key={label}>
+                <td>{label}</td>
+                <td>{fmtUsd(loaded)}</td>
+                <td>{fmtUsd(spent)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -217,20 +223,22 @@ function LanesPanel({ lanes }) {
   return (
     <div className="panel">
       <h2 style={{ marginTop: 0 }}>Books by account lane</h2>
-      <table>
-        <thead>
-          <tr><th /><th>Individual accounts</th><th>Org accounts</th></tr>
-        </thead>
-        <tbody>
-          {left.map(([label, value], i) => (
-            <tr key={label}>
-              <td>{label}</td>
-              <td>{value}</td>
-              <td>{right[i][1]}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr><th /><th>Individual accounts</th><th>Org accounts</th></tr>
+          </thead>
+          <tbody>
+            {left.map(([label, value], i) => (
+              <tr key={label}>
+                <td>{label}</td>
+                <td>{value}</td>
+                <td>{right[i][1]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <p className="sub">*token-based estimate at current rates — everything else is an exact count.</p>
     </div>
   )
@@ -430,23 +438,25 @@ export default function Spend() {
 
       {results.length > 1 && (
         <div className="panel">
-          <table>
-            <thead>
-              <tr><th>Email</th><th>User ID</th><th /></tr>
-            </thead>
-            <tbody>
-              {results.map((u) => (
-                <tr key={u.userId}>
-                  <td>{u.email}</td>
-                  <td className="mono">{u.userId}</td>
-                  <td>
-                    <button className="small" disabled={busy}
-                            onClick={() => openSubject('user', u.userId, u.email)}>Open</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Email</th><th>User ID</th><th /></tr>
+              </thead>
+              <tbody>
+                {results.map((u) => (
+                  <tr key={u.userId}>
+                    <td>{u.email}</td>
+                    <td className="mono">{u.userId}</td>
+                    <td>
+                      <button className="small" disabled={busy}
+                              onClick={() => openSubject('user', u.userId, u.email)}>Open</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

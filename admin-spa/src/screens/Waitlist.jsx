@@ -188,21 +188,23 @@ export default function Waitlist() {
         {preAdmits.length > 0 && (
           <>
             <h3 style={{ margin: '16px 0 8px' }}>Pending pre-admits ({preAdmits.length})</h3>
-            <table>
-              <thead>
-                <tr><th>Email</th><th>Admitted by</th><th>Added</th><th>Expires</th></tr>
-              </thead>
-              <tbody>
-                {preAdmits.map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.email}</td>
-                    <td className="mono">{p.admittedBy}</td>
-                    <td className="mono">{p.createdAt}</td>
-                    <td className="mono">{p.expiresAt}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="table-wrap">
+              <table className="cards" role="table">
+                <thead role="rowgroup">
+                  <tr role="row"><th role="columnheader">Email</th><th role="columnheader">Admitted by</th><th role="columnheader">Added</th><th role="columnheader">Expires</th></tr>
+                </thead>
+                <tbody role="rowgroup">
+                  {preAdmits.map((p) => (
+                    <tr role="row" key={p.id}>
+                      <td role="cell" data-label="Email">{p.email}</td>
+                      <td role="cell" data-label="Admitted by" className="mono">{p.admittedBy}</td>
+                      <td role="cell" data-label="Added" className="mono">{p.createdAt}</td>
+                      <td role="cell" data-label="Expires" className="mono">{p.expiresAt}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </>
         )}
       </div>
@@ -212,24 +214,26 @@ export default function Waitlist() {
         {entries.length === 0 ? (
           <p className="sub" style={{ margin: 0 }}>Nobody is waiting.</p>
         ) : (
-          <table>
-            <thead>
-              <tr><th>#</th><th>Email</th><th>Signed up</th><th /></tr>
-            </thead>
-            <tbody>
-              {entries.map((e, i) => (
-                <tr key={e.userId}>
-                  <td>{i + 1}</td>
-                  <td>{e.email}</td>
-                  <td className="mono">{e.createdAt}</td>
-                  <td>
-                    <button className="small" disabled={remaining <= 0}
-                            onClick={() => admit(e)}>Admit</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table className="cards" role="table">
+              <thead role="rowgroup">
+                <tr role="row"><th role="columnheader">#</th><th role="columnheader">Email</th><th role="columnheader">Signed up</th><th role="columnheader" /></tr>
+              </thead>
+              <tbody role="rowgroup">
+                {entries.map((e, i) => (
+                  <tr role="row" key={e.userId}>
+                    <td role="cell" data-label="#">{i + 1}</td>
+                    <td role="cell" data-label="Email">{e.email}</td>
+                    <td role="cell" data-label="Signed up" className="mono">{e.createdAt}</td>
+                    <td role="cell">
+                      <button className="small" disabled={remaining <= 0}
+                              onClick={() => admit(e)}>Admit</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </>

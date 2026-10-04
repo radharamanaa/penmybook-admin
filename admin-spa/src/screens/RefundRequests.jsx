@@ -206,67 +206,69 @@ export default function RefundRequests() {
       ) : !degraded && requests.length === 0 ? (
         <p className="sub">Queue is clear — nobody is waiting under {status.replaceAll('_', ' ')}.</p>
       ) : requests.length > 0 ? (
-        <table>
-          <thead>
-            <tr>
-              <th>Owner</th>
-              <th>Status</th>
-              <th>Asked</th>
-              <th>Quoted refundable</th>
-              <th>Live refundable</th>
-              <th>Refunded</th>
-              <th>Residual</th>
-              <th>Reason</th>
-              <th>Age</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {requests.map((row) => (
-              <tr key={row.id}>
-                <td>
-                  <div>{row.ownerName || `${row.ownerType}/${row.ownerId}`}</div>
-                  {row.ownerEmail && <div className="sub">{row.ownerEmail}</div>}
-                  {row.ownerName && (
-                    <div className="mono" style={{ fontSize: 11 }}>{row.ownerType}/{row.ownerId}</div>
-                  )}
-                </td>
-                <td>
-                  <span className={`badge ${STATUS_BADGE[row.status] ?? 'neutral'}`}>
-                    {row.status}
-                  </span>
-                </td>
-                <td>{fmtCents(row.requestedAmountCents)}</td>
-                <td>{fmtCents(row.snapshotRefundableCents)}</td>
-                <td>{fmtCents(row.liveRefundableCents)}</td>
-                <td>{fmtCents(row.refundedCents)}</td>
-                <td>{fmtCents(row.residualCents)}</td>
-                <td style={{ maxWidth: 240, whiteSpace: 'pre-wrap' }}>{row.reason || '—'}</td>
-                <td className="mono">{ageOf(row.createdAt)}</td>
-                <td>
-                  {row.status === 'PENDING' && (
-                    <div className="row" style={{ marginTop: 0 }}>
-                      <button type="button" className="small" onClick={() => startOtp(row, 'APPROVE')}>
-                        Approve
-                      </button>
-                      <button type="button" className="ghost small" onClick={() => startOtp(row, 'REJECT')}>
-                        Reject
-                      </button>
-                    </div>
-                  )}
-                  {row.status === 'APPROVED' && (
-                    <Link
-                      className="small"
-                      to={`/users?refundRequestId=${encodeURIComponent(row.id)}&ownerType=${encodeURIComponent(row.ownerType)}&ownerId=${encodeURIComponent(row.ownerId)}${row.ownerEmail ? `&ownerEmail=${encodeURIComponent(row.ownerEmail)}` : ''}`}
-                    >
-                      Pay out
-                    </Link>
-                  )}
-                </td>
+        <div className="table-wrap">
+          <table className="cards" role="table">
+            <thead role="rowgroup">
+              <tr role="row">
+                <th role="columnheader">Owner</th>
+                <th role="columnheader">Status</th>
+                <th role="columnheader">Asked</th>
+                <th role="columnheader">Quoted refundable</th>
+                <th role="columnheader">Live refundable</th>
+                <th role="columnheader">Refunded</th>
+                <th role="columnheader">Residual</th>
+                <th role="columnheader">Reason</th>
+                <th role="columnheader">Age</th>
+                <th role="columnheader" />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody role="rowgroup">
+              {requests.map((row) => (
+                <tr role="row" key={row.id}>
+                  <td role="cell" data-label="Owner">
+                    <div>{row.ownerName || `${row.ownerType}/${row.ownerId}`}</div>
+                    {row.ownerEmail && <div className="sub">{row.ownerEmail}</div>}
+                    {row.ownerName && (
+                      <div className="mono" style={{ fontSize: 11 }}>{row.ownerType}/{row.ownerId}</div>
+                    )}
+                  </td>
+                  <td role="cell" data-label="Status">
+                    <span className={`badge ${STATUS_BADGE[row.status] ?? 'neutral'}`}>
+                      {row.status}
+                    </span>
+                  </td>
+                  <td role="cell" data-label="Asked">{fmtCents(row.requestedAmountCents)}</td>
+                  <td role="cell" data-label="Quoted refundable">{fmtCents(row.snapshotRefundableCents)}</td>
+                  <td role="cell" data-label="Live refundable">{fmtCents(row.liveRefundableCents)}</td>
+                  <td role="cell" data-label="Refunded">{fmtCents(row.refundedCents)}</td>
+                  <td role="cell" data-label="Residual">{fmtCents(row.residualCents)}</td>
+                  <td role="cell" data-label="Reason" style={{ maxWidth: 240, whiteSpace: 'pre-wrap' }}>{row.reason || '—'}</td>
+                  <td role="cell" data-label="Age" className="mono">{ageOf(row.createdAt)}</td>
+                  <td role="cell">
+                    {row.status === 'PENDING' && (
+                      <div className="row" style={{ marginTop: 0 }}>
+                        <button type="button" className="small" onClick={() => startOtp(row, 'APPROVE')}>
+                          Approve
+                        </button>
+                        <button type="button" className="ghost small" onClick={() => startOtp(row, 'REJECT')}>
+                          Reject
+                        </button>
+                      </div>
+                    )}
+                    {row.status === 'APPROVED' && (
+                      <Link
+                        className="small"
+                        to={`/users?refundRequestId=${encodeURIComponent(row.id)}&ownerType=${encodeURIComponent(row.ownerType)}&ownerId=${encodeURIComponent(row.ownerId)}${row.ownerEmail ? `&ownerEmail=${encodeURIComponent(row.ownerEmail)}` : ''}`}
+                      >
+                        Pay out
+                      </Link>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : null}
 
       <h2 style={{ marginTop: 28 }}>Unresolved residuals</h2>
@@ -285,38 +287,40 @@ export default function RefundRequests() {
       ) : !residualsDegraded && residuals.length === 0 ? (
         <p className="sub">No unresolved residuals.</p>
       ) : residuals.length > 0 ? (
-        <table>
-          <thead>
-            <tr>
-              <th>Owner</th>
-              <th>Amount</th>
-              <th>Payment</th>
-              <th>Paddle txn</th>
-              <th>Reason</th>
-              <th>Age</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {residuals.map((row) => (
-              <tr key={row.id}>
-                <td>
-                  <div className="mono" style={{ fontSize: 11 }}>{row.ownerType}/{row.ownerId}</div>
-                </td>
-                <td>{fmtCents(row.amountCents)}</td>
-                <td className="mono" style={{ fontSize: 11 }}>{row.paymentId || '—'}</td>
-                <td className="mono" style={{ fontSize: 11 }}>{row.paddleTransactionId || '—'}</td>
-                <td style={{ maxWidth: 280, whiteSpace: 'pre-wrap' }}>{row.reason || '—'}</td>
-                <td className="mono">{ageOf(row.createdAt)}</td>
-                <td>
-                  <button type="button" className="small" onClick={() => startSettleOtp(row)}>
-                    Settle
-                  </button>
-                </td>
+        <div className="table-wrap">
+          <table className="cards" role="table">
+            <thead role="rowgroup">
+              <tr role="row">
+                <th role="columnheader">Owner</th>
+                <th role="columnheader">Amount</th>
+                <th role="columnheader">Payment</th>
+                <th role="columnheader">Paddle txn</th>
+                <th role="columnheader">Reason</th>
+                <th role="columnheader">Age</th>
+                <th role="columnheader" />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody role="rowgroup">
+              {residuals.map((row) => (
+                <tr role="row" key={row.id}>
+                  <td role="cell" data-label="Owner">
+                    <div className="mono" style={{ fontSize: 11 }}>{row.ownerType}/{row.ownerId}</div>
+                  </td>
+                  <td role="cell" data-label="Amount">{fmtCents(row.amountCents)}</td>
+                  <td role="cell" data-label="Payment" className="mono" style={{ fontSize: 11 }}>{row.paymentId || '—'}</td>
+                  <td role="cell" data-label="Paddle txn" className="mono" style={{ fontSize: 11 }}>{row.paddleTransactionId || '—'}</td>
+                  <td role="cell" data-label="Reason" style={{ maxWidth: 280, whiteSpace: 'pre-wrap' }}>{row.reason || '—'}</td>
+                  <td role="cell" data-label="Age" className="mono">{ageOf(row.createdAt)}</td>
+                  <td role="cell">
+                    <button type="button" className="small" onClick={() => startSettleOtp(row)}>
+                      Settle
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : null}
 
       {otp && otp.kind === 'resolve' && (

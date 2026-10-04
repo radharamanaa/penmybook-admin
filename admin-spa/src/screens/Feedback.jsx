@@ -103,71 +103,73 @@ export default function Feedback() {
       {error && <div className="msg error">{error}</div>}
       {loading && <p className="sub">Loading…</p>}
 
-      <table>
-        <thead>
-          <tr>
-            <th>When</th>
-            <th>Context</th>
-            <th>Rating</th>
-            <th>Category</th>
-            <th>Message</th>
-            <th>Shots</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((row) => (
-            <tr key={row.feedback_id}>
-              <td className="mono">{fmtDate(row.created_at)}</td>
-              <td>{row.context || '—'}</td>
-              <td>{row.rating != null ? row.rating : '—'}</td>
-              <td>{row.category || '—'}</td>
-              <td style={{ maxWidth: 320, whiteSpace: 'pre-wrap' }}>
-                {row.message || '—'}
-              </td>
-              <td>
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  {(row.screenshot_ids || []).map((id) =>
-                    thumbUrls[id] ? (
-                      <a key={id} href={thumbUrls[id]} target="_blank" rel="noreferrer">
-                        <img
-                          src={thumbUrls[id]}
-                          alt="screenshot"
-                          style={{
-                            width: 48,
-                            height: 48,
-                            objectFit: 'cover',
-                            borderRadius: 4,
-                          }}
-                        />
-                      </a>
-                    ) : (
-                      <span key={id} className="sub" style={{ fontSize: 11 }}>…</span>
-                    ),
-                  )}
-                </div>
-              </td>
-              <td>
-                <button
-                  type="button"
-                  className="small"
-                  onClick={() => {
-                    setResolveId(row.feedback_id)
-                    setResolveNote('')
-                  }}
-                >
-                  Resolve
-                </button>
-              </td>
-            </tr>
-          ))}
-          {!loading && items.length === 0 && (
+      <div className="table-wrap">
+        <table>
+          <thead>
             <tr>
-              <td colSpan={7} className="sub">No feedback yet.</td>
+              <th>When</th>
+              <th>Context</th>
+              <th>Rating</th>
+              <th>Category</th>
+              <th>Message</th>
+              <th>Shots</th>
+              <th />
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {items.map((row) => (
+              <tr key={row.feedback_id}>
+                <td className="mono">{fmtDate(row.created_at)}</td>
+                <td>{row.context || '—'}</td>
+                <td>{row.rating != null ? row.rating : '—'}</td>
+                <td>{row.category || '—'}</td>
+                <td style={{ maxWidth: 320, whiteSpace: 'pre-wrap' }}>
+                  {row.message || '—'}
+                </td>
+                <td>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {(row.screenshot_ids || []).map((id) =>
+                      thumbUrls[id] ? (
+                        <a key={id} href={thumbUrls[id]} target="_blank" rel="noreferrer">
+                          <img
+                            src={thumbUrls[id]}
+                            alt="screenshot"
+                            style={{
+                              width: 48,
+                              height: 48,
+                              objectFit: 'cover',
+                              borderRadius: 4,
+                            }}
+                          />
+                        </a>
+                      ) : (
+                        <span key={id} className="sub" style={{ fontSize: 11 }}>…</span>
+                      ),
+                    )}
+                  </div>
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    className="small"
+                    onClick={() => {
+                      setResolveId(row.feedback_id)
+                      setResolveNote('')
+                    }}
+                  >
+                    Resolve
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {!loading && items.length === 0 && (
+              <tr>
+                <td colSpan={7} className="sub">No feedback yet.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
       {total > 20 && (
         <div className="row" style={{ marginTop: 12, gap: 8, alignItems: 'center' }}>
