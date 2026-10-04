@@ -23,7 +23,7 @@ do NOT reintroduce `../` paths, or the subtree mirror + the EC2 build break.
 ## How it deploys (prod)
 
 A **dedicated EC2 island** (`infra/terraform/admin_ec2.tf`, currently in the MAIN terraform state —
-see the deferred TF-split), reached at **admin.writemybook.me** (Route 53), **never** through
+see the deferred TF-split), reached at **admin.writehisbook.com** (Route 53; migrated from writemybook.me), **never** through
 penmybook.ai / the ALB. Boot (`infra/terraform/admin_user_data.sh.tftpl`): install docker → clone
 the repo branch → `cd src/admin` → `docker compose -f docker-compose.yml -f docker-compose.prod.yml
 up -d --build admin-spa book_admin admin-api` → seed 2 bootstrap admins (`seed_admin_user`) → Caddy
