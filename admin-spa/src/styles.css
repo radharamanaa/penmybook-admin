@@ -153,7 +153,8 @@ button.small { padding: 4px 10px; margin-top: 0; font-size: 0.85rem; }
   h1, h2, h3, code, .mono, .msg { overflow-wrap: anywhere; }
 
   .layout { display: block; }
-  .main { padding: 16px; max-width: none; }
+  /* Bottom room so the last button can scroll clear of the floating theme switcher. */
+  .main { padding: 16px 16px 88px; max-width: none; }
   .topbar {
     display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 10;
     padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--border);
@@ -195,10 +196,12 @@ button.small { padding: 4px 10px; margin-top: 0; font-size: 0.85rem; }
   }
   /* !important beats the inline maxWidth some cells carry for desktop. */
   table.cards td { border: none; padding: 4px 0; max-width: none !important; }
-  table.cards td[data-label] { display: grid; grid-template-columns: 40% 1fr; gap: 8px; }
+  table.cards td[data-label] {
+    display: grid; grid-template-columns: 40% minmax(0, 1fr); gap: 8px; overflow-wrap: anywhere;
+  }
   table.cards td[data-label]::before { content: attr(data-label); color: var(--muted); font-size: 0.82rem; }
   /* A cell with several lines (Owner) keeps them all in the value column. */
-  table.cards td[data-label] > * { grid-column: 2; }
+  table.cards td[data-label] > * { grid-column: 2; justify-self: start; }
   table.cards td:not([data-label]) button,
   table.cards td:not([data-label]) a.small { width: 100%; margin-top: 6px; }
 }
