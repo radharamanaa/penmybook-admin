@@ -1,15 +1,23 @@
 import { useState } from 'react'
 import { paletteList } from '../palettes'
 import { usePalette } from '../PaletteProvider'
+import { usePhoneLayout } from '../usePhoneLayout.js'
 
 // Plain-CSS port of the authors' site PaletteSwitcher (that one is Tailwind;
-// the admin console is not). Fixed top-right, recolors every screen live.
+// the admin console is not). Fixed top-right on desktop and bottom-right on a
+// phone, where the top bar holds the menu; recolors every screen live.
 export function PaletteSwitcher() {
   const { paletteId, setPaletteId, palette } = usePalette()
   const [open, setOpen] = useState(false)
+  const phone = usePhoneLayout()
 
   return (
-    <div style={{ position: 'fixed', top: 12, right: 12, zIndex: 1000, textAlign: 'right' }}>
+    <div
+      style={phone
+        ? { position: 'fixed', bottom: 16, right: 16, zIndex: 40, textAlign: 'right',
+            display: 'flex', flexDirection: 'column-reverse', alignItems: 'flex-end' }
+        : { position: 'fixed', top: 12, right: 12, zIndex: 1000, textAlign: 'right' }}
+    >
       <button
         onClick={() => setOpen(!open)}
         style={{
@@ -31,7 +39,8 @@ export function PaletteSwitcher() {
       {open && (
         <div
           style={{
-            marginTop: 8,
+            marginTop: phone ? 0 : 8,
+            marginBottom: phone ? 8 : 0,
             width: 272,
             background: 'var(--panel)',
             border: '1px solid var(--border)',
