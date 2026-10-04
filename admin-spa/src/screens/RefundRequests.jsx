@@ -59,6 +59,9 @@ export default function RefundRequests() {
   const [amountDraft, setAmountDraft] = useState('')
   const confirmRef = useRef(null)
   useScrollIntoViewOnPhone(confirmRef, otp)
+  // Results show at the page top, above both tables; bring them into view on a phone.
+  const resultRef = useRef(null)
+  useScrollIntoViewOnPhone(resultRef, ok || error, 'start')
 
   const load = useCallback(async () => {
     setError(null)
@@ -177,8 +180,10 @@ export default function RefundRequests() {
         Identity names load when entitlements answers; a quiet banner shows if they do
         not. Residuals below are money that could not go back to a card.
       </p>
-      {error && <div className="msg error">{error}</div>}
-      {ok && <div className="msg ok">{ok}</div>}
+      <div ref={resultRef}>
+        {error && <div className="msg error">{error}</div>}
+        {ok && <div className="msg ok">{ok}</div>}
+      </div>
       {degraded && (
         <div className="msg error">
           Billing did not answer. This is not an empty queue — do not treat the list as complete.

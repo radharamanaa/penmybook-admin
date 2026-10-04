@@ -76,6 +76,8 @@ input, select, textarea {
   background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
   border-radius: 6px; padding: 7px 10px; width: 100%; max-width: 360px;
 }
+/* Textareas keep their own width (Feedback's resolve note fills its panel). */
+textarea { max-width: none; }
 input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent); }
 input.dirty { border-color: var(--warn); }
 
@@ -179,11 +181,16 @@ button.small { padding: 4px 10px; margin-top: 0; font-size: 0.85rem; }
     border: 1px solid var(--accent); color: var(--accent); text-decoration: none;
   }
   .row > button:not(.small) { width: 100%; }
-  .info-btn { position: relative; }
+  /* Pagers stay inline (Prev · Page x / y · Next). */
+  .row.pager > button { width: auto; }
+  /* Keep the 16px circle; the ::after box below gives the 44px hit area. */
+  .info-btn { position: relative; min-height: 16px; }
   .info-btn::after { content: ""; position: absolute; inset: -14px; }
 
   .settings-grid { grid-template-columns: minmax(0, 1fr); }
   .login-card { width: min(360px, 100% - 24px); }
+  /* Scrolled-to panels and banners land below the sticky top bar, not under it. */
+  .main * { scroll-margin-top: 72px; }
 
   /* Card tables */
   table.cards thead {

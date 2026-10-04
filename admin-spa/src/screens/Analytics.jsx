@@ -331,7 +331,7 @@ export default function Analytics() {
           </table>
         </div>
         {bookTotal > 20 && (
-          <div className="row" style={{ marginTop: 12, gap: 8, alignItems: 'center' }}>
+          <div className="row pager" style={{ marginTop: 12, gap: 8, alignItems: 'center' }}>
             <button type="button" disabled={bookPage <= 1}
                     onClick={() => setBookPage((p) => Math.max(1, p - 1))}>Prev</button>
             <span className="sub">Page {bookPage} / {pageCount} ({bookTotal} books)</span>

@@ -30,8 +30,19 @@ export default function Users() {
   ))
   const [error, setError] = useState(null)
   const actionsRef = useRef(null)
-  useScrollIntoViewOnPhone(actionsRef, selected)
+  useScrollIntoViewOnPhone(actionsRef, selected, 'start')
+  // Money results show at the page top; on a phone the operator is scrolled down at the
+  // OTP row, so each result (even a repeated one) brings the banner into view.
+  const [resultSeq, setResultSeq] = useState(0)
+  const resultRef = useRef(null)
+  useScrollIntoViewOnPhone(resultRef, resultSeq, 'start')
   const [ok, setOk] = useState(null)
+
+  function showResult(okMessage, errorMessage) {
+    setOk(okMessage)
+    setError(errorMessage)
+    setResultSeq((n) => n + 1)
+  }
 
   async function search(e) {
     e.preventDefault()
@@ -71,8 +82,10 @@ export default function Users() {
     <>
       <h1>Users & money</h1>
       <p className="sub">Search by email; wallet top-up, OTP-gated grants and refunds.</p>
-      {error && <div className="msg error">{error}</div>}
-      {ok && <div className="msg ok">{ok}</div>}
+      <div ref={resultRef}>
+        {error && <div className="msg error">{error}</div>}
+        {ok && <div className="msg ok">{ok}</div>}
+      </div>
       {orgPayoutUnwired && (
         <div className="msg error" role="status">
           Open org payout is not wired on this screen — use request {linkedRequestId} from the org tools.
@@ -120,8 +133,8 @@ export default function Users() {
                        initialPaymentId={linkedPaymentId}
                        initialRefundRequestId={linkedRequestId}
                        refundRequestIdReadOnly={Boolean(linkedRequestId)}
-                       onDone={(msg) => { setOk(msg); setError(null) }}
-                       onError={(msg) => { setError(msg); setOk(null) }} />
+                       onDone={(msg) => showResult(msg, null)}
+                       onError={(msg) => showResult(null, msg)} />
         </div>
       )}
     </>
@@ -139,6 +152,8 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
   // OTP flow state: which action is mid-challenge + the challenge id + code.
   const [otp, setOtp] = useState(null) // {action, challengeId, params}
   const [code, setCode] = useState('')
+  const otpRowRef = useRef(null)
+  useScrollIntoViewOnPhone(otpRowRef, otp)
 
   async function startOtp(action, params) {
     try {
@@ -260,7 +275,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
       </p>
 
       {otp && (
-        <div className="row" style={{ marginTop: 14 }}>
+        <div ref={otpRowRef} className="row" style={{ marginTop: 14 }}>
           <div>
             <label htmlFor="otp-code">OTP code for <code>{otp.action}</code> (check email / dev DB)</label>
             <input id="otp-code" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} maxLength={6} />
