@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
 import { api, hasToken, onAuthExpired, setToken } from './api.js'
+import { AdminShell } from './AdminShell.jsx'
 
 // Portal sections, mirroring docs/admin-control-plane/PARAMETERS.md.
-const CONFIG_SECTIONS = [
+export const CONFIG_SECTIONS = [
   { key: 'tiers', label: 'Tiers & caps' },
   { key: 'safety', label: 'Content safety' },
   { key: 'moderation', label: 'Moderation & access' },
@@ -69,38 +69,5 @@ export default function App() {
     setAdminEmail(null)
   }
 
-  return (
-    <div className="layout">
-      <nav className="sidebar">
-        <div className="brand">PenMyBook<small>admin control plane</small></div>
-        <div className="group">Operate</div>
-        <NavLink to="/" end>Operations</NavLink>
-        <NavLink to="/analytics">Analytics</NavLink>
-        <NavLink to="/feedback">Feedback</NavLink>
-        <NavLink to="/spend">Spend</NavLink>
-        {import.meta.env.VITE_ENABLE_REFUND_QUEUE === 'true' && (
-          <NavLink to="/refund-requests">Refund requests</NavLink>
-        )}
-        <div className="group">Configure</div>
-        {CONFIG_SECTIONS.map((s) => (
-          <NavLink key={s.key} to={`/config/${s.key}`}>{s.label}</NavLink>
-        ))}
-        <NavLink to="/pricing">Pricing & billing</NavLink>
-        <NavLink to="/system">System (read-only)</NavLink>
-        <div className="group">People</div>
-        <NavLink to="/users">Users & money</NavLink>
-        <NavLink to="/waitlist">Waitlist</NavLink>
-        <div className="group">Govern</div>
-        <NavLink to="/accounts">Admin accounts</NavLink>
-        <NavLink to="/audit">Audit log</NavLink>
-        <div className="foot">
-          <div className="mono" style={{ marginBottom: 8 }}>{adminEmail}</div>
-          <button className="ghost small" onClick={logout}>Sign out</button>
-        </div>
-      </nav>
-      <main className="main">
-        <Outlet />
-      </main>
-    </div>
-  )
+  return <AdminShell adminEmail={adminEmail} onLogout={logout} sections={CONFIG_SECTIONS} />
 }

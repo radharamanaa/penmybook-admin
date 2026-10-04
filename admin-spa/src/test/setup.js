@@ -23,3 +23,5 @@ if (!window.matchMedia) {
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = vi.fn()
 }
+// jsdom logs "Not implemented" for scrollTo; the drawer's scroll lock calls it.
+window.scrollTo = vi.fn()
