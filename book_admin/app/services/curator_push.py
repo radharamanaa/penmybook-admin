@@ -16,6 +16,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from urllib.parse import quote
+
 import httpx
 import jwt
 
@@ -76,6 +78,21 @@ async def push_operations(actor: str, changes: dict[str, Any]) -> dict[str, Any]
     return await _request(
         "PUT", "/internal/admin-config/operations", {"actor": actor, **changes}
     )
+
+
+async def get_trusted_sites() -> dict[str, Any]:
+    """Every runtime change to the trusted-site list."""
+    return await _request("GET", "/internal/trusted-sites")
+
+
+async def put_trusted_site(actor: str, site: str, action: str, reason: str) -> dict[str, Any]:
+    return await _request(
+        "PUT", "/internal/trusted-sites", {"actor": actor, "site": site, "action": action, "reason": reason},
+    )
+
+
+async def delete_trusted_site(actor: str, site: str) -> dict[str, Any]:
+    return await _request("DELETE", f"/internal/trusted-sites/{quote(site, safe='')}?actor={quote(actor, safe='')}")
 
 
 async def push_section(actor: str, section: str, values: dict[str, Any]) -> dict[str, Any]:

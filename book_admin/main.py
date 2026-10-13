@@ -24,6 +24,7 @@ from app.config.settings import settings
 from app.db.mongo import close_db
 from api.routers.admin import router as admin_router
 from api.routers.admin_config import router as admin_config_router
+from api.routers.trusted_sites import router as trusted_sites_router
 from api.routers.admin_users import router as admin_users_router
 from api.routers.analytics_proxy import router as analytics_proxy_router
 from api.routers.auth import router as auth_router
@@ -61,5 +62,6 @@ app.include_router(auth_router, prefix="/admin/auth")
 app.include_router(admin_router, prefix="/admin")
 app.include_router(admin_users_router, prefix="/admin")
 app.include_router(admin_config_router, prefix="/admin")
+app.include_router(trusted_sites_router, prefix="/admin")
 app.include_router(analytics_proxy_router, prefix="/admin")
 app.include_router(feedback_router, prefix="/admin")

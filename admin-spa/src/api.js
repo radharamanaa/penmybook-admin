@@ -93,6 +93,12 @@ export const api = {
   getConfig: () => request('/py/admin/config'),
   putConfigSection: (section, values) =>
     request(`/py/admin/config/${section}`, { method: 'PUT', body: { values } }),
+  // Runtime changes to the worker's trusted-site list.
+  listTrustedSites: () => request('/py/admin/trusted-sites'),
+  putTrustedSite: (site, action, reason) =>
+    request('/py/admin/trusted-sites', { method: 'PUT', body: { site, action, reason } }),
+  deleteTrustedSite: (site) =>
+    request(`/py/admin/trusted-sites/${encodeURIComponent(site)}`, { method: 'DELETE' }),
 
   // ── users & money (admin-api) ──
   searchUsers: (email, limit = 50) =>

@@ -15,6 +15,7 @@ import Spend from './screens/Spend.jsx'
 import AdminAccounts from './screens/AdminAccounts.jsx'
 import Audit from './screens/Audit.jsx'
 import SystemView from './screens/SystemView.jsx'
+import TrustedSites from './screens/TrustedSites.jsx'
 import RefundRequests from './screens/RefundRequests.jsx'
 import './styles.css'
 
@@ -27,6 +28,7 @@ const router = createBrowserRouter([
       { path: '/', element: <Operations /> },
       { path: '/config/:section', element: <ConfigSection /> },
       { path: '/pricing', element: <Pricing /> },
+      { path: '/trusted-sites', element: <TrustedSites /> },
       { path: '/users', element: <Users /> },
       { path: '/waitlist', element: <Waitlist /> },
       { path: '/analytics', element: <Analytics /> },

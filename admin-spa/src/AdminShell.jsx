@@ -80,6 +80,7 @@ export function AdminShell({ adminEmail, onLogout, sections }) {
         {sections.map((s) => (
           <NavLink key={s.key} to={`/config/${s.key}`} onClick={close}>{s.label}</NavLink>
         ))}
+        {link('/trusted-sites', 'Trusted sites')}
         {link('/pricing', 'Pricing & billing')}
         {link('/system', 'System (read-only)')}
         <div className="group">People</div>
