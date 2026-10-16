@@ -81,13 +81,15 @@ describe('card tables', () => {
     api.refundResiduals.mockResolvedValue({
       residuals: [{
         id: 's1', ownerType: 'USER', ownerId: 'u1', amountCents: 200, paymentId: 'pay-1',
-        paddleTransactionId: 'txn-1', reason: 'left over', createdAt: new Date().toISOString(),
+        providerPaymentRef: 'pi_1', reason: 'left over', createdAt: new Date().toISOString(),
       }],
       degraded: false,
     })
     render(<MemoryRouter><RefundRequests /></MemoryRouter>)
     await screen.findByText('please')
     await screen.findByText('left over')
+    expect(screen.getByRole('columnheader', { name: 'Stripe payment' })).toBeInTheDocument()
+    expect(screen.getByText('pi_1')).toBeInTheDocument()
     const tables = document.querySelectorAll('table')
     expect(tables.length).toBe(2)
     tables.forEach(assertCardTable)

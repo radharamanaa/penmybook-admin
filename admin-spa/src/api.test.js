@@ -29,7 +29,7 @@ const STEP_UP_WRITES = [
   ['walletTopUp', () => api.walletTopUp('u1', 500, 'admin top-up', 'tok-abc')],
   ['grantCredits', () => api.grantCredits('u1', 500, 'tok-abc')],
   ['refund', () => api.refund('u1', 'pay1', 500, 'admin refund', 'tok-abc')],
-  ['forceResolveReversed', () => api.forceResolveReversed('u1', 'pay1', 'Paddle confirmed reverse', 'tok-abc')],
+  ['forceResolveReversed', () => api.forceResolveReversed('u1', 'pay1', 'Stripe refund re_01 confirmed failed', 'tok-abc')],
 ]
 
 describe('api.js', () => {
@@ -136,10 +136,10 @@ describe('api.js', () => {
 
   describe('forceResolveReversed body', () => {
     it('posts note to the payment restore route', async () => {
-      await api.forceResolveReversed('u1', 'pay1', 'Paddle confirmed reverse', 'tok-abc')
+      await api.forceResolveReversed('u1', 'pay1', 'Stripe refund re_01 confirmed failed', 'tok-abc')
       const [url, init] = global.fetch.mock.calls[0]
       expect(url).toBe('/api/v1/admin/users/u1/payments/pay1/force-resolve-reversed')
-      expect(JSON.parse(init.body)).toEqual({ note: 'Paddle confirmed reverse' })
+      expect(JSON.parse(init.body)).toEqual({ note: 'Stripe refund re_01 confirmed failed' })
     })
   })
 

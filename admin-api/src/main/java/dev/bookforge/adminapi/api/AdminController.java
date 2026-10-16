@@ -443,7 +443,7 @@ public class AdminController {
     }
 
     /**
-     * C-17: restore wallet after Paddle refund {@code reversed}. Step-up action is {@code refund};
+     * C-17: restore wallet after Stripe reversed the refund. Step-up action is {@code refund};
      * paramsHash is {@code {paymentId, forceResolve=true, note}} so a payout token cannot match.
      * Webhooks still do not auto-restore.
      */

@@ -9,7 +9,7 @@ public record RefundResidualEntry(
         String ownerType,
         UUID ownerId,
         UUID paymentId,
-        String paddleTransactionId,
+        String providerPaymentRef,
         long amountCents,
         String reason,
         Instant createdAt

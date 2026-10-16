@@ -139,7 +139,7 @@ export const api = {
     }),
 
   // ── refund-request queue (admin-api → billing). Resolve owns a 35s budget because
-  // billing fans out one 15s Paddle refund per payment; the default 12s abort would
+  // billing fans out one 15s Stripe refund per payment; the default 12s abort would
   // fire while money is still moving and look like a failed refund.
   refundRequestQueue: (status = 'PENDING', limit = 50) =>
     request(`/api/v1/admin/refund-requests?status=${encodeURIComponent(status)}&limit=${limit}`),

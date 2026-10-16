@@ -70,7 +70,7 @@ public class HttpDownstreamClient implements DownstreamClient {
     /** Phase-3b admin-portal calls use the 5-second budget mandated by the task spec. */
     private static final Duration ADMIN_RPC_TIMEOUT = Duration.ofSeconds(5);
     /**
-     * Approve fans out one Paddle refund per payment (15s budget each). Three typical top-ups
+     * Approve fans out one Stripe refund per payment (15s budget each). Three typical top-ups
      * need ~30s; a 5s timeout here is the double-refund path (billing settles APPROVED, we
      * DENY, the operator retries via POST /users/{id}/refund).
      */
@@ -441,7 +441,7 @@ public class HttpDownstreamClient implements DownstreamClient {
                         n.path("ownerType").asText(),
                         UUID.fromString(n.path("ownerId").asText()),
                         n.hasNonNull("paymentId") ? UUID.fromString(n.path("paymentId").asText()) : null,
-                        n.path("paddleTransactionId").asText(null),
+                        providerPaymentRef(n),
                         n.path("amountCents").asLong(0L),
                         n.path("reason").asText(""),
                         parseInstant(n.path("createdAt").asText(null))));
@@ -451,6 +451,19 @@ public class HttpDownstreamClient implements DownstreamClient {
             log.warn("refund-residual queue unavailable: {}", e.getMessage());
             return new RefundResidualQueueView(true, List.of());
         }
+    }
+
+    /** Billing sends {@code providerPaymentRef}. Older payloads used {@code paddleTransactionId}. */
+    static String providerPaymentRef(JsonNode n) {
+        JsonNode current = n.get("providerPaymentRef");
+        if (current != null && current.isTextual() && !current.asText().isBlank()) {
+            return current.asText();
+        }
+        JsonNode legacy = n.get("paddleTransactionId");
+        if (legacy != null && legacy.isTextual() && !legacy.asText().isBlank()) {
+            return legacy.asText();
+        }
+        return null;
     }
 
     public RefundResidualQueueView listRefundResidualsFallback(Throwable t) {
@@ -519,7 +532,7 @@ public class HttpDownstreamClient implements DownstreamClient {
             return DownstreamResult.refund(success, auditEntryId, requestedCents,
                     walletDebitedCents, idempotentReplay);
         } catch (DownstreamConflictException conflict) {
-            // 409: a refund for this payment is already awaiting Paddle's card-credit approval
+            // 409: a refund for this payment is already awaiting Stripe's card-credit approval
             // (billing's PENDING_CARD_REFUND guard). NOT an outage and NOT a failed action to retry
             // now — log distinctly so ops don't chase it as a billing error. Reported as
             // success=false (the action did not occur); the operator retries once the prior settles.

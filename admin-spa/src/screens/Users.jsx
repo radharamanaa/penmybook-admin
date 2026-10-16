@@ -10,7 +10,7 @@ import { useScrollIntoViewOnPhone } from '../useScrollIntoViewOnPhone.js'
  *
  * Queue payout is a deep-link: `/users?refundRequestId=&ownerType=&ownerId=&ownerEmail=&paymentId=`.
  * When an APPROVED request id is present it is bound into the OTP and forwarded to billing.
- * Restore after Paddle reversed uses the same {@code refund} OTP action with {@code forceResolve}.
+ * Restore after Stripe reversed uses the same {@code refund} OTP action with {@code forceResolve}.
  */
 export default function Users() {
   const [searchParams] = useSearchParams()
@@ -249,15 +249,15 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
       </div>
       <p className="sub">
         Uses live remaining on the payment. Leftover promo inside remaining can ride the
-        Paddle refund.
+        Stripe refund.
       </p>
 
       <div className="row" style={{ marginTop: 14 }}>
         <div>
-          <label htmlFor="reverse-note">Restore after Paddle reversed (payment ID above)</label>
+          <label htmlFor="reverse-note">Restore after Stripe reversed (payment ID above)</label>
           <input id="reverse-note" value={reverseNote}
                  onChange={(e) => setReverseNote(e.target.value)}
-                 placeholder="Paddle adjustment id / dashboard confirmed reverse" />
+                 placeholder="Stripe refund id (re_…)" />
         </div>
         <button disabled={!refundPayment || reverseNote.trim().length < 8}
                 onClick={() => startOtp('refund', {
@@ -269,8 +269,9 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
         </button>
       </div>
       <p className="sub">
-        Does not credit the card. Only restores the wallet after you have confirmed in Paddle
-        that this refund adjustment is reversed. If the card refund still stands, this donates
+        Does not credit the card. Only restores the wallet after you have confirmed in Stripe
+        that this refund was reversed and the wallet was not put back. A failed refund is
+        already returned. If the card refund still stands, this donates
         the claw. Webhooks never auto-restore.
       </p>
 

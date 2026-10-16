@@ -1,6 +1,6 @@
 Feature: Staff residual queue is platform-admin only and step-up gated
   Residuals are money that could not be auto-returned to a card. Settling a refund-request
-  residual closes an APPROVED leftover without crediting (the Paddle refusal rolled the debit
+  residual closes an APPROVED leftover without crediting (the Stripe refusal rolled the debit
   back). Account-deletion residuals still credit the wallet. Billing HTTP 200 is success
   even when settled=false (already-resolved replay).
 

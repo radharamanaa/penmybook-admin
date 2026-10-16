@@ -177,7 +177,7 @@ function PaymentsHealthPanel({ health, error }) {
     <div className="panel">
       <h2 style={{ marginTop: 0 }}>Payments health</h2>
       <p className="sub">
-        Paddle integration signal — stuck card refunds, uncredited top-ups, and webhook recency.
+        Stripe integration signal — stuck card refunds, uncredited top-ups, and webhook recency.
       </p>
       <div className="stats">
         <div>

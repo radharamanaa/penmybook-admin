@@ -215,18 +215,18 @@ public class PortalAdminSteps {
 
     @When("they attempt to force-resolve a reversed payment")
     public void attemptForceResolveReversed() {
-        lastResponse = forceResolveCall(FIXED_PAYMENT, "Paddle dashboard confirmed reversed", false);
+        lastResponse = forceResolveCall(FIXED_PAYMENT, "Stripe refund re_01 confirmed failed", false);
     }
 
     @When("they force-resolve a reversed payment")
     public void doForceResolveReversed() {
-        lastResponse = forceResolveCall(FIXED_PAYMENT, "Paddle dashboard confirmed reversed", true);
+        lastResponse = forceResolveCall(FIXED_PAYMENT, "Stripe refund re_01 confirmed failed", true);
     }
 
     @When("they force-resolve a reversed payment using a payout token")
     public void forceResolveWithPayoutToken() {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("note", "Paddle dashboard confirmed reversed");
+        body.put("note", "Stripe refund re_01 confirmed failed");
         lastResponse = sendWithStepUp(HttpMethod.POST,
                 "/v1/admin/users/" + TARGET_USER + "/payments/" + FIXED_PAYMENT
                         + "/force-resolve-reversed",

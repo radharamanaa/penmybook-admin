@@ -10,7 +10,7 @@ vi.mock('../api.js', () => ({
 import Users from './Users.jsx'
 
 describe('Users refund copy (S5)', () => {
-  it('tells staff leftover promo can ride a Paddle refund', async () => {
+  it('tells staff leftover promo can ride a Stripe refund', async () => {
     const { api } = await import('../api.js')
     api.searchUsers.mockResolvedValue([
       { userId: 'u1', email: 'a@b.co', accountStatus: 'ACTIVE' },

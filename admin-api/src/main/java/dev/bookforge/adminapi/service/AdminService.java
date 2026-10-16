@@ -246,7 +246,7 @@ public class AdminService {
     }
 
     /**
-     * Restore a {@code PENDING_CARD_REFUND} after Paddle {@code reversed}. Same {@code refund}
+     * Restore a {@code PENDING_CARD_REFUND} after Stripe reversed the refund. Same {@code refund}
      * step-up action as payout, but the paramsHash includes {@code forceResolve=true} so a
      * payout token cannot be reused. Webhooks never call this.
      */

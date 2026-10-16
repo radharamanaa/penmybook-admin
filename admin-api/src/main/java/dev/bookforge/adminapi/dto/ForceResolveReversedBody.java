@@ -9,7 +9,7 @@ import jakarta.validation.constraints.Size;
  * <p>{@code note} is bound into the {@code refund} step-up {@code paramsHash} together with
  * {@code forceResolve=true} so a payout token cannot be replayed onto a restore. Admin-api
  * and billing both check that hash. Billing does not persist the note (LOW); it is still
- * required so staff type a Paddle-confirmed reason.
+ * required so staff type the Stripe refund id they confirmed.
  */
 public record ForceResolveReversedBody(
         @NotBlank(message = "note is required")

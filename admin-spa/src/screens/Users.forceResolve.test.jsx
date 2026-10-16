@@ -49,33 +49,34 @@ describe('Users force-resolve reversed (C-17)', () => {
     await userEvent.click(screen.getByRole('button', { name: /manage/i }))
 
     expect(screen.getByText(/does not credit the card/i)).toBeInTheDocument()
+    expect(screen.getByText(/a failed refund is already returned/i)).toBeInTheDocument()
     expect(screen.getByText(/webhooks never auto-restore/i)).toBeInTheDocument()
 
     const restore = screen.getByRole('button', { name: /start otp restore \(reversed\)/i })
     expect(restore).toBeDisabled()
 
-    await userEvent.type(screen.getByLabelText(/restore after paddle reversed/i), 'short')
+    await userEvent.type(screen.getByLabelText(/restore after stripe reversed/i), 'short')
     expect(restore).toBeDisabled()
 
-    await userEvent.clear(screen.getByLabelText(/restore after paddle reversed/i))
+    await userEvent.clear(screen.getByLabelText(/restore after stripe reversed/i))
     await userEvent.type(screen.getByLabelText(/refund — payment id/i), PAYMENT_ID)
     await userEvent.type(
-      screen.getByLabelText(/restore after paddle reversed/i),
-      'Paddle adj adj_01 confirmed reverse',
+      screen.getByLabelText(/restore after stripe reversed/i),
+      're_01 confirmed reversed',
     )
     await userEvent.click(restore)
 
     expect(otpStart).toHaveBeenCalledWith('refund', 'u1', {
       paymentId: PAYMENT_ID,
       forceResolve: true,
-      note: 'Paddle adj adj_01 confirmed reverse',
+      note: 're_01 confirmed reversed',
     })
 
     await userEvent.type(screen.getByLabelText(/otp code/i), '123456')
     await userEvent.click(screen.getByRole('button', { name: /verify & execute/i }))
 
     expect(forceResolveReversed).toHaveBeenCalledWith(
-      'u1', PAYMENT_ID, 'Paddle adj adj_01 confirmed reverse', 'tok-abc',
+      'u1', PAYMENT_ID, 're_01 confirmed reversed', 'tok-abc',
     )
     expect(refund).not.toHaveBeenCalled()
     expect(await screen.findByText(/restored 2500¢ to wallet/i)).toBeInTheDocument()

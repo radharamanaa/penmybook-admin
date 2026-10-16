@@ -176,7 +176,7 @@ export default function RefundRequests() {
       <h1>Refund requests</h1>
       <p className="sub">
         Users ask; you decide the amount against the live refundable figure (snapshot is
-        what we quoted). Leftover promo inside remaining can ride the Paddle refund.
+        what we quoted). Leftover promo inside remaining can ride the Stripe refund.
         Identity names load when entitlements answers; a quiet banner shows if they do
         not. Residuals below are money that could not go back to a card.
       </p>
@@ -302,7 +302,7 @@ export default function RefundRequests() {
                 <th role="columnheader">Owner</th>
                 <th role="columnheader">Amount</th>
                 <th role="columnheader">Payment</th>
-                <th role="columnheader">Paddle txn</th>
+                <th role="columnheader">Stripe payment</th>
                 <th role="columnheader">Reason</th>
                 <th role="columnheader">Age</th>
                 <th role="columnheader" />
@@ -316,7 +316,7 @@ export default function RefundRequests() {
                   </td>
                   <td role="cell" data-label="Amount">{fmtCents(row.amountCents)}</td>
                   <td role="cell" data-label="Payment" className="mono" style={{ fontSize: 11 }}>{row.paymentId || '—'}</td>
-                  <td role="cell" data-label="Paddle txn" className="mono" style={{ fontSize: 11 }}>{row.paddleTransactionId || '—'}</td>
+                  <td role="cell" data-label="Stripe payment" className="mono" style={{ fontSize: 11 }}>{row.providerPaymentRef || '—'}</td>
                   <td role="cell" data-label="Reason" style={{ maxWidth: 280, whiteSpace: 'pre-wrap' }}>{row.reason || '—'}</td>
                   <td role="cell" data-label="Age" className="mono">{ageOf(row.createdAt)}</td>
                   <td role="cell">
@@ -386,7 +386,7 @@ export default function RefundRequests() {
           </h2>
           <p className="sub">
             Settles this residual. Refund-request rows close the request without a wallet credit
-            (the Paddle refusal never took the cash). The residual id is bound into the OTP.
+            (the Stripe refusal never took the cash). The residual id is bound into the OTP.
           </p>
           <div className="row">
             <div>

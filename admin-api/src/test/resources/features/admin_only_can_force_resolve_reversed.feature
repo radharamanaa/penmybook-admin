@@ -1,6 +1,6 @@
 Feature: Force-resolve reversed is platform-admin only and step-up bound
   POST /v1/admin/users/{userId}/payments/{paymentId}/force-resolve-reversed restores a
-  PENDING_CARD_REFUND after Paddle reversed. It uses the refund OTP action with
+  PENDING_CARD_REFUND after Stripe reversed the refund. It uses the refund OTP action with
   forceResolve=true so a payout token cannot be replayed. Webhooks do not auto-restore.
 
   Scenario: A non-admin user is rejected with 403 and a DENY audit row is written
