@@ -146,6 +146,15 @@ button.small { padding: 4px 10px; margin-top: 0; font-size: 0.85rem; }
 .login-wrap { min-height: 100vh; display: grid; place-items: center; }
 .login-card { width: 360px; }
 
+/* Analytics: a book row's expanded calls + tokens (BookUsageDetail). */
+button.small.usage-toggle { margin-top: 6px; }
+.usage-detail-row > td { background: var(--panel-2); }
+.usage-detail { display: flex; gap: 12px 28px; flex-wrap: wrap; align-items: start; }
+.usage-detail > div { flex: 1 1 280px; min-width: 0; }
+.usage-detail h3 { font-size: 0.92rem; margin: 4px 0 6px; }
+.usage-detail .sub, .usage-detail-empty { margin: 0; }
+.usage-detail td.sub-row { padding-left: 24px; color: var(--muted); }
+
 /* ---------- Phone (≤767px) ---------- */
 .topbar { display: none; }
 .table-wrap { overflow-x: auto; max-width: 100%; }
@@ -188,6 +197,9 @@ button.small { padding: 4px 10px; margin-top: 0; font-size: 0.85rem; }
   .info-btn::after { content: ""; position: absolute; inset: -14px; }
 
   .settings-grid { grid-template-columns: minmax(0, 1fr); }
+  /* The books table scrolls sideways; its expanded detail stays pinned to the
+     visible width (main + panel + cell padding = 96px) and scrolls in its own boxes. */
+  .usage-detail, .usage-detail-empty { position: sticky; left: 0; max-width: calc(100vw - 96px); }
   .login-card { width: min(360px, 100% - 24px); }
   /* Scrolled-to panels and banners land below the sticky top bar, not under it. */
   .main * { scroll-margin-top: 72px; }

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { api } from '../api.js'
+import BookUsageDetail from './BookUsageDetail.jsx'
 
 const GENRE_LABELS = {
   technical: 'Technical',
@@ -11,6 +12,8 @@ const GENRE_LABELS = {
 }
 const GENRE_ORDER = Object.keys(GENRE_LABELS)
 const GENRE_N_MAX = 12
+
+const BOOK_TABLE_COLUMNS = 11
 
 const PERIODS = ['last_week', 'last_month', 'last_3_months', 'last_year']
 
@@ -64,6 +67,14 @@ export default function Analytics() {
   const [genreN, setGenreN] = useState(8)
   const [genreCounts, setGenreCounts] = useState(null)
   const [genreError, setGenreError] = useState(null)
+  const [expandedBookIds, setExpandedBookIds] = useState(() => new Set())
+
+  const toggleBookDetail = (bookId) => setExpandedBookIds((current) => {
+    const next = new Set(current)
+    if (next.has(bookId)) next.delete(bookId)
+    else next.add(bookId)
+    return next
+  })
 
   const load = useCallback(async () => {
     setError(null)
@@ -308,12 +319,22 @@ export default function Analytics() {
             </thead>
             <tbody>
               {bookRows.length === 0 ? (
-                <tr><td colSpan={11} className="sub">No books in this period.</td></tr>
-              ) : bookRows.map((row) => (
-                <tr key={row.book_id}>
+                <tr><td colSpan={BOOK_TABLE_COLUMNS} className="sub">No books in this period.</td></tr>
+              ) : bookRows.map((row) => {
+                const expanded = expandedBookIds.has(row.book_id)
+                const detailId = `book-usage-${row.book_id}`
+                return (
+                <Fragment key={row.book_id}>
+                <tr>
                   <td>
                     <div>{row.book_title || '(untitled)'}</div>
                     <div className="mono sub">{row.book_id}</div>
+                    <button type="button" className="ghost small usage-toggle"
+                            aria-expanded={expanded} aria-controls={expanded ? detailId : undefined}
+                            aria-label={`${expanded ? 'Hide' : 'Show'} calls and tokens for ${row.book_title || row.book_id}`}
+                            onClick={() => toggleBookDetail(row.book_id)}>
+                      {expanded ? 'Hide calls & tokens' : 'Calls & tokens'}
+                    </button>
                   </td>
                   <td className="mono">{row.status}</td>
                   <td>{row.created_at ? row.created_at.slice(0, 10) : '—'}</td>
@@ -326,7 +347,16 @@ export default function Analytics() {
                   <td>{fmtUsd(row.costCents)}</td>
                   <td>{fmtUsd(row.deltaCents)}</td>
                 </tr>
-              ))}
+                {expanded && (
+                  <tr id={detailId} className="usage-detail-row">
+                    <td colSpan={BOOK_TABLE_COLUMNS}>
+                      <BookUsageDetail calls={row.calls} tokensByBucket={row.tokens_by_bucket} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>
