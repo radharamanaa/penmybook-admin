@@ -136,6 +136,21 @@ describe('Analytics per-book calls and tokens', () => {
     expect(screen.queryByText('Calls by system')).not.toBeInTheDocument()
   })
 
+  it('shows the cached input the edit bot and the planner record', async () => {
+    mockScreen([{
+      ...BOOK_WITH_USAGE,
+      tokens_by_bucket: {
+        planning: { input_tokens: 4000, output_tokens: 50, cached_input_tokens: 3500 },
+        editing: { input_tokens: 9000, output_tokens: 30, cached_input_tokens: 8000 },
+      },
+    }])
+    render(<Analytics />)
+    await expandBook('Alpha')
+    const [, tokensTable] = screen.getAllByRole('table').slice(-2)
+    expect(cellsOf(rowOf(tokensTable, 'Planning'))).toEqual(['Planning', '4,000', '3,500', '50'])
+    expect(cellsOf(rowOf(tokensTable, 'Editing'))).toEqual(['Editing', '9,000', '8,000', '30'])
+  })
+
   it('collapses again', async () => {
     mockScreen([BOOK_WITH_USAGE])
     render(<Analytics />)
