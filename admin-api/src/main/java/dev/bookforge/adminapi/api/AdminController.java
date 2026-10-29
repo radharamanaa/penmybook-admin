@@ -14,6 +14,7 @@ import dev.bookforge.adminapi.dto.AccountStateView;
 import dev.bookforge.adminapi.dto.AdminActionResult;
 import dev.bookforge.adminapi.dto.AdminCommand;
 import dev.bookforge.adminapi.dto.WalletUnfrozenView;
+import dev.bookforge.adminapi.dto.OrgWalletStateView;
 import dev.bookforge.adminapi.dto.AdminOtpStartRequest;
 import dev.bookforge.adminapi.dto.AdminOtpStartResponse;
 import dev.bookforge.adminapi.dto.AdminOtpVerifyRequest;
@@ -131,6 +132,7 @@ public class AdminController {
     /** Lift a wallet freeze. Hash is {ownerType, ownerId}; billing verifies and spends it. */
     private static final String STEP_UP_ACTION_WALLET_UNFREEZE = "wallet_unfreeze";
     private static final String OWNER_TYPE_USER = "USER";
+    private static final String OWNER_TYPE_ORG = "ORG";
     /** Header carrying the single-use, action-bound step-up token (spec 05 §3). */
     private static final String STEP_UP_TOKEN_HEADER = "X-Step-Up-Token";
     private static final String REJECT_STEP_UP_REQUIRED = "step_up_required";
@@ -663,6 +665,45 @@ public class AdminController {
         auditEventWriter.writeAllow(actorOf(jwt), ACTION_WALLET_UNFREEZE, RESOURCE_USER,
                 userId.toString(), null, newValue, clientIp(request));
         return ResponseEntity.ok(new WalletUnfrozenView(userId, outcome.lifted()));
+    }
+
+    /** An org wallet's freeze, reason and unrecovered money. A READ — no step-up, no audit row. */
+    @GetMapping("/orgs/{orgId}/wallet-state")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public OrgWalletStateView orgWalletState(@PathVariable UUID orgId) {
+        return adminService.orgWalletState(orgId);
+    }
+
+    /**
+     * Lift an org wallet freeze (a chargeback on an org top-up). Same {@code wallet_unfreeze}
+     * step-up as a user wallet; the hash binds {@code {ownerType: ORG, ownerId: orgId}} with the org
+     * as the target, so a user-wallet approval cannot lift an org freeze or the reverse. Members
+     * suspended by the hold are reactivated one by one.
+     */
+    @PostMapping("/orgs/{orgId}/wallet/unfreeze")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<Object> unfreezeOrgWallet(@PathVariable UUID orgId,
+                                                    @Valid @RequestBody AccountHoldReleaseBody body,
+                                                    @RequestHeader(value = STEP_UP_TOKEN_HEADER, required = false)
+                                                    String stepUpToken,
+                                                    @AuthenticationPrincipal Jwt jwt,
+                                                    HttpServletRequest request) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("ownerType", OWNER_TYPE_ORG);
+        params.put("ownerId", orgId.toString());
+        AdminCommand command = new AdminCommand(actorOf(jwt), orgId,
+                STEP_UP_ACTION_WALLET_UNFREEZE, stepUpToken, params);
+        AdminService.WalletUnfreezeOutcome outcome = adminService.unfreezeWallet(command, body.note());
+        if (!outcome.success()) {
+            return stepUpRejectionResponse(outcome.rejectionReason(), STEP_UP_ACTION_WALLET_UNFREEZE, params);
+        }
+
+        Map<String, Object> newValue = new LinkedHashMap<>();
+        newValue.put("lifted", outcome.lifted());
+        newValue.put("note", body.note());
+        auditEventWriter.writeAllow(actorOf(jwt), ACTION_WALLET_UNFREEZE, RESOURCE_ORG,
+                orgId.toString(), null, newValue, clientIp(request));
+        return ResponseEntity.ok(Map.of("orgId", orgId, "lifted", outcome.lifted()));
     }
 
     // ───────── 4. PATCH set platform-admin flag ─────────

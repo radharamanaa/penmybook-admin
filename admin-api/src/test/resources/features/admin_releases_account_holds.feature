@@ -88,6 +88,34 @@ Feature: Staff can lift a chargeback or review hold
     And the response code is "step_up_invalid"
     And billing was not asked to unfreeze any wallet
 
+  Scenario: A platform admin reads an org wallet's freeze
+    Given a platform admin is signed in
+    And the target org wallet is frozen for "dispute:du_org" with 300 cents unrecovered
+    When they read the target org's wallet state
+    Then the response status is 200
+    And the org wallet state shows a freeze for "dispute:du_org" and 300 cents unrecovered
+
+  Scenario: A platform admin lifts an org wallet freeze
+    Given a platform admin is signed in
+    When they unfreeze the target org's wallet with a valid step-up token
+    Then the response status is 200
+    And the wallet unfreeze reports lifted
+    And billing was asked to unfreeze the target org's ORG wallet
+    And the audit log has an ALLOW row for action "WALLET_UNFREEZE"
+
+  Scenario: A user-wallet approval cannot lift an org freeze
+    Given a platform admin is signed in
+    When they unfreeze the target org's wallet with a token approved for a user wallet
+    Then the response status is 403
+    And the response code is "step_up_invalid"
+    And billing was not asked to unfreeze any wallet
+
+  Scenario: A non-admin cannot lift an org wallet freeze
+    Given a non-admin user is signed in
+    When they attempt to unfreeze the target org's wallet
+    Then the response status is 403
+    And billing was not asked to unfreeze any wallet
+
   Scenario: A non-admin cannot lift a wallet freeze
     Given a non-admin user is signed in
     When they attempt to unfreeze the target user's wallet

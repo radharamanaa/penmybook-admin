@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api.js'
 import { useScrollIntoViewOnPhone } from '../useScrollIntoViewOnPhone.js'
+import OrgHold from './OrgHold.jsx'
 
 /**
  * User search + money ops. Grant/refund/restore-reversed are OTP step-up gated (D6): start a
@@ -126,6 +127,8 @@ export default function Users() {
           </div>
         </div>
       )}
+
+      <OrgHold />
 
       {selected && (
         <div ref={actionsRef}>

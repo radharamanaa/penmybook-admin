@@ -32,6 +32,7 @@ const STEP_UP_WRITES = [
   ['forceResolveReversed', () => api.forceResolveReversed('u1', 'pay1', 'Stripe refund re_01 confirmed failed', 'tok-abc')],
   ['unsuspend', () => api.unsuspend('u1', 'dispute won in Stripe', 'tok-abc')],
   ['unfreezeWallet', () => api.unfreezeWallet('u1', 'dispute won in Stripe', 'tok-abc')],
+  ['unfreezeOrgWallet', () => api.unfreezeOrgWallet('o1', 'dispute won in Stripe', 'tok-abc')],
 ]
 
 describe('api.js', () => {

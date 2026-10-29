@@ -17,6 +17,7 @@ import dev.bookforge.adminapi.dto.WalletSummaryView;
 import dev.bookforge.adminapi.dto.AdminActionResult;
 import dev.bookforge.adminapi.dto.AdminCommand;
 import dev.bookforge.adminapi.dto.OrgView;
+import dev.bookforge.adminapi.dto.OrgWalletStateView;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import dev.bookforge.adminapi.security.AdminParamsHasher;
 import dev.bookforge.adminapi.security.InMemoryStepUpTokenStore;
@@ -73,6 +74,7 @@ public class AdminService {
     private static final java.util.Set<String> BILLING_SPENDS_TOKEN = java.util.Set.of(REFUND, WALLET_UNFREEZE);
 
     private static final String USER_OWNER_TYPE = "USER";
+    private static final String ORG_OWNER_TYPE = "ORG";
 
     private static final String REJECT_STEP_UP_REQUIRED = "step_up_required";
     private static final String REJECT_STEP_UP_INVALID = "step_up_invalid";
@@ -183,6 +185,13 @@ public class AdminService {
         return result.success()
                 ? WalletUnfreezeOutcome.done(result.lifted())
                 : WalletUnfreezeOutcome.downstreamRejected();
+    }
+
+    /** An org wallet's freeze and unrecovered money (billing). */
+    public OrgWalletStateView orgWalletState(UUID orgId) {
+        WalletSummaryView wallet = downstream.walletSummary(ORG_OWNER_TYPE, orgId);
+        return new OrgWalletStateView(orgId, wallet.walletExists(), wallet.balanceCents(),
+                wallet.frozen(), wallet.frozenReason(), wallet.unrecoveredCents());
     }
 
     /** Account status (entitlements) plus the wallet's freeze and unrecovered money (billing). */

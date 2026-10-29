@@ -249,6 +249,73 @@ public class PortalAdminSteps {
                         .withBody("{\"error\":\"step_up_rejected\"}")));
     }
 
+    @Given("the target org wallet is frozen for {string} with {long} cents unrecovered")
+    public void targetOrgWalletFrozen(String reason, long unrecoveredCents) {
+        AdminWireMock.server().stubFor(get(urlPathEqualTo("/internal/admin/wallet/summary"))
+                .withQueryParam("ownerType", equalTo("ORG"))
+                .withQueryParam("ownerId", equalTo(TARGET_ORG.toString()))
+                .atPriority(1)
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"walletExists\":true,\"balanceCents\":0,\"moneyInCents\":0,"
+                                + "\"consumeRefundCents\":0,\"paymentClawbackCents\":0,"
+                                + "\"stripeCashGrossCents\":0,\"stripeCardRefundedCents\":0,"
+                                + "\"frozen\":true,\"frozenReason\":\"" + reason + "\","
+                                + "\"unrecoveredCents\":" + unrecoveredCents + "}")));
+    }
+
+    @When("they read the target org's wallet state")
+    public void readOrgWalletState() {
+        lastResponse = sendGet("/v1/admin/orgs/" + TARGET_ORG + "/wallet-state");
+    }
+
+    @When("they unfreeze the target org's wallet with a valid step-up token")
+    public void unfreezeOrgWithToken() {
+        unfreezeOrg(boundToken("wallet_unfreeze", TARGET_ORG, orgWalletParams()));
+    }
+
+    @When("they unfreeze the target org's wallet with a token approved for a user wallet")
+    public void unfreezeOrgWithUserToken() {
+        unfreezeOrg(boundToken("wallet_unfreeze", TARGET_ORG, walletParams(TARGET_ORG)));
+    }
+
+    @When("they attempt to unfreeze the target org's wallet")
+    public void attemptUnfreezeOrg() {
+        unfreezeOrg(null);
+    }
+
+    private void unfreezeOrg(String stepUpToken) {
+        AdminWireMock.server().stubFor(post(urlPathEqualTo("/internal/admin/wallet/unfreeze"))
+                .atPriority(5)
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"lifted\":true}")));
+        lastResponse = sendWithStepUp(HttpMethod.POST,
+                "/v1/admin/orgs/" + TARGET_ORG + "/wallet/unfreeze", Map.of("note", HOLD_NOTE), stepUpToken);
+    }
+
+    private static Map<String, Object> orgWalletParams() {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("ownerType", "ORG");
+        params.put("ownerId", TARGET_ORG.toString());
+        return params;
+    }
+
+    @Then("the org wallet state shows a freeze for {string} and {long} cents unrecovered")
+    public void orgWalletStateShows(String reason, long unrecoveredCents) {
+        JsonNode body = parseBody();
+        assertThat(body.path("orgId").asText()).isEqualTo(TARGET_ORG.toString());
+        assertThat(body.path("walletFrozen").asBoolean()).isTrue();
+        assertThat(body.path("walletFrozenReason").asText()).isEqualTo(reason);
+        assertThat(body.path("unrecoveredCents").asLong()).isEqualTo(unrecoveredCents);
+    }
+
+    @Then("billing was asked to unfreeze the target org's ORG wallet")
+    public void billingUnfreezeOrgCalled() {
+        AdminWireMock.server().verify(1, postRequestedFor(urlPathEqualTo("/internal/admin/wallet/unfreeze"))
+                .withRequestBody(matchingJsonPath("$.ownerType", equalTo("ORG")))
+                .withRequestBody(matchingJsonPath("$.ownerId", equalTo(TARGET_ORG.toString())))
+                .withRequestBody(matchingJsonPath("$.staffUserId", equalTo(staffUserId.toString()))));
+    }
+
     @Then("billing was asked to unfreeze {int} times")
     public void billingUnfreezeCalledTimes(int times) {
         AdminWireMock.server().verify(times, postRequestedFor(urlPathEqualTo("/internal/admin/wallet/unfreeze")));

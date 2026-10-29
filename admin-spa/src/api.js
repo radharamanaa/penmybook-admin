@@ -145,6 +145,13 @@ export const api = {
       body: { note },
       headers: { 'X-Step-Up-Token': stepUpToken },
     }),
+  orgWalletState: (orgId) => request(`/api/v1/admin/orgs/${orgId}/wallet-state`),
+  unfreezeOrgWallet: (orgId, note, stepUpToken) =>
+    request(`/api/v1/admin/orgs/${orgId}/wallet/unfreeze`, {
+      method: 'POST',
+      body: { note },
+      headers: { 'X-Step-Up-Token': stepUpToken },
+    }),
   forceResolveReversed: (userId, paymentId, note, stepUpToken) =>
     request(`/api/v1/admin/users/${userId}/payments/${paymentId}/force-resolve-reversed`, {
       method: 'POST',
