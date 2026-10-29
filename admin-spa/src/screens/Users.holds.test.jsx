@@ -28,6 +28,7 @@ import Users from './Users.jsx'
 const HELD = {
   userId: 'u1',
   accountStatus: 'SUSPENDED_FOR_REVIEW',
+  suspensionKind: 'DISPUTE',
   walletExists: true,
   balanceCents: 0,
   walletFrozen: true,
@@ -66,6 +67,14 @@ describe('Users — lifting a chargeback or review hold (F3)', () => {
     expect(await screen.findByText(/suspended for review/i, { selector: '.hold-status' })).toBeInTheDocument()
     expect(screen.getByText(/dispute:du_1/)).toBeInTheDocument()
     expect(screen.getByText(/\$1\.26 could not be taken back/i)).toBeInTheDocument()
+    expect(screen.getByText('card dispute')).toBeInTheDocument()
+  })
+
+  it('names a content review so it is not mistaken for a payment hold', async () => {
+    accountState.mockResolvedValue({ ...HELD, suspensionKind: 'CONTENT', walletFrozen: false })
+    await manage()
+
+    expect(await screen.findByText('content review')).toBeInTheDocument()
   })
 
   it('reactivates with a note, binding no params into the OTP', async () => {

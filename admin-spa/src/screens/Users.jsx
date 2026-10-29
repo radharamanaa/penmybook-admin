@@ -146,6 +146,13 @@ export default function Users() {
 
 const SUSPENDED_STATUSES = new Set(['SUSPENDED', 'SUSPENDED_FOR_REVIEW'])
 const HOLD_NOTE_MIN_LENGTH = 8
+// Why a SUSPENDED_FOR_REVIEW account is held, so staff never lift a content review believing it
+// was a payment hold.
+const HOLD_KIND_LABELS = {
+  DISPUTE: 'card dispute',
+  REFUND: 'refund hold',
+  CONTENT: 'content review',
+}
 
 function formatDollars(cents) {
   return `$${(cents / 100).toFixed(2)}`
@@ -170,6 +177,9 @@ function HoldPanel({ state, note, onNoteChange, onReactivate, onUnfreeze }) {
         Account: <span className="hold-status">
           {(state.accountStatus ?? 'unknown').toLowerCase().replaceAll('_', ' ')}
         </span>
+        {suspended && HOLD_KIND_LABELS[state.suspensionKind] && (
+          <> — <strong>{HOLD_KIND_LABELS[state.suspensionKind]}</strong></>
+        )}
         {state.walletFrozen && <> · Wallet frozen (<code>{state.walletFrozenReason}</code>)</>}
       </p>
       {state.unrecoveredCents > 0 && (

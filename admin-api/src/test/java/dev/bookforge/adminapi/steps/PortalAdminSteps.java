@@ -159,7 +159,7 @@ public class PortalAdminSteps {
         AdminWireMock.server().stubFor(get(urlPathEqualTo("/internal/admin/users/" + TARGET_USER + "/status"))
                 .atPriority(1)
                 .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
-                        .withBody("{\"accountStatus\":\"SUSPENDED_FOR_REVIEW\"}")));
+                        .withBody("{\"accountStatus\":\"SUSPENDED_FOR_REVIEW\",\"suspensionKind\":\"DISPUTE\"}")));
         AdminWireMock.server().stubFor(get(urlPathEqualTo("/internal/admin/wallet/summary"))
                 .atPriority(1)
                 .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
@@ -346,6 +346,7 @@ public class PortalAdminSteps {
         JsonNode body = parseBody();
         assertThat(body.path("userId").asText()).isEqualTo(TARGET_USER.toString());
         assertThat(body.path("accountStatus").asText()).isEqualTo(status);
+        assertThat(body.path("suspensionKind").asText()).isEqualTo("DISPUTE");
         assertThat(body.path("walletFrozen").asBoolean()).isTrue();
         assertThat(body.path("walletFrozenReason").asText()).isEqualTo(frozenReason);
         assertThat(body.path("unrecoveredCents").asLong()).isEqualTo(unrecoveredCents);

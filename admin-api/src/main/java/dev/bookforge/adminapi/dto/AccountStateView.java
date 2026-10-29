@@ -9,6 +9,8 @@ import java.util.UUID;
 public record AccountStateView(
         UUID userId,
         String accountStatus,
+        /** Why a SUSPENDED_FOR_REVIEW account is held: CONTENT, DISPUTE or REFUND (null otherwise). */
+        String suspensionKind,
         boolean walletExists,
         long balanceCents,
         boolean walletFrozen,

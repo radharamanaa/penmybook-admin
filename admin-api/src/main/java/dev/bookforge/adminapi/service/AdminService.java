@@ -198,7 +198,8 @@ public class AdminService {
     public AccountStateView accountState(UUID userId) {
         AccountStatusView status = downstream.accountStatus(userId);
         WalletSummaryView wallet = downstream.walletSummary(USER_OWNER_TYPE, userId);
-        return new AccountStateView(userId, status.accountStatus(), wallet.walletExists(),
+        return new AccountStateView(userId, status.accountStatus(), status.suspensionKind(),
+                wallet.walletExists(),
                 wallet.balanceCents(), wallet.frozen(), wallet.frozenReason(), wallet.unrecoveredCents());
     }
 

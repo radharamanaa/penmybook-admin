@@ -617,7 +617,8 @@ public class HttpDownstreamClient implements DownstreamClient {
         String url = downstream.entitlementsUrl() + "/internal/admin/users/" + userId + "/status";
         JsonNode json = get(url, ENTITLEMENTS_AUD, STEP_UP_RPC_TIMEOUT);
         String status = json.path("accountStatus").asText(null);
-        return new AccountStatusView(userId, status);
+        String suspensionKind = json.hasNonNull("suspensionKind") ? json.path("suspensionKind").asText() : null;
+        return new AccountStatusView(userId, status, suspensionKind);
     }
 
     @Override
