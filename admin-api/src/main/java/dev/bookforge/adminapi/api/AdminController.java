@@ -8,8 +8,12 @@ import dev.bookforge.adminapi.dto.PreAdmitView;
 import dev.bookforge.adminapi.dto.WaitlistAdmitView;
 import dev.bookforge.adminapi.dto.WaitlistConfigView;
 import dev.bookforge.adminapi.dto.WaitlistEntryView;
+import dev.bookforge.adminapi.dto.AccountHoldReleaseBody;
+import dev.bookforge.adminapi.dto.AccountReactivatedView;
+import dev.bookforge.adminapi.dto.AccountStateView;
 import dev.bookforge.adminapi.dto.AdminActionResult;
 import dev.bookforge.adminapi.dto.AdminCommand;
+import dev.bookforge.adminapi.dto.WalletUnfrozenView;
 import dev.bookforge.adminapi.dto.AdminOtpStartRequest;
 import dev.bookforge.adminapi.dto.AdminOtpStartResponse;
 import dev.bookforge.adminapi.dto.AdminOtpVerifyRequest;
@@ -95,6 +99,8 @@ public class AdminController {
     private static final String ACTION_SET_PLATFORM_ADMIN = "SET_PLATFORM_ADMIN";
     private static final String ACTION_UPSERT_ORG_PRICING = "UPSERT_ORG_PRICING";
     private static final String ACTION_UPSERT_GLOBAL_PRICING = "UPSERT_GLOBAL_PRICING";
+    private static final String ACTION_ACCOUNT_REACTIVATE = "ACCOUNT_REACTIVATE";
+    private static final String ACTION_WALLET_UNFREEZE = "WALLET_UNFREEZE";
 
     private static final String RESOURCE_USER = "USER";
     private static final String RESOURCE_PAYMENT = "PAYMENT";
@@ -120,6 +126,11 @@ public class AdminController {
     private static final String STEP_UP_ACTION_SETTLE_REFUND_RESIDUAL = "settle_refund_residual";
     /** Action name the step-up token must be bound to for an admin wallet top-up (H3). */
     private static final String STEP_UP_ACTION_WALLET_TOP_UP = "wallet_top_up";
+    /** Reactivate a suspended account. Hash binds the target user only (no params). */
+    private static final String STEP_UP_ACTION_UNSUSPEND = "unsuspend";
+    /** Lift a wallet freeze. Hash is {ownerType, ownerId}; billing verifies and spends it. */
+    private static final String STEP_UP_ACTION_WALLET_UNFREEZE = "wallet_unfreeze";
+    private static final String OWNER_TYPE_USER = "USER";
     /** Header carrying the single-use, action-bound step-up token (spec 05 §3). */
     private static final String STEP_UP_TOKEN_HEADER = "X-Step-Up-Token";
     private static final String REJECT_STEP_UP_REQUIRED = "step_up_required";
@@ -127,7 +138,8 @@ public class AdminController {
     /** Valid admin step-up actions an OTP challenge may be started for. */
     private static final Set<String> STEP_UP_ACTIONS =
             Set.of(STEP_UP_ACTION_GRANT_CREDIT, STEP_UP_ACTION_REFUND, STEP_UP_ACTION_WALLET_TOP_UP,
-                   STEP_UP_ACTION_RESOLVE_REFUND_REQUEST, STEP_UP_ACTION_SETTLE_REFUND_RESIDUAL);
+                   STEP_UP_ACTION_RESOLVE_REFUND_REQUEST, STEP_UP_ACTION_SETTLE_REFUND_RESIDUAL,
+                   STEP_UP_ACTION_UNSUSPEND, STEP_UP_ACTION_WALLET_UNFREEZE);
 
     private static final Set<String> REFUND_QUEUE_STATUSES = Set.of(
             "PENDING", "APPROVED", "REJECTED", "WITHDRAWN", "PAYING", "SETTLED");
@@ -573,6 +585,84 @@ public class AdminController {
     private ResponseEntity<Object> stepUpRejection(AdminActionResult result,
                                                    Map<String, Object> params) {
         return stepUpRejectionResponse(result.rejectionReason(), STEP_UP_ACTION_GRANT_CREDIT, params);
+    }
+
+    // ───────── 3b. Account holds: read, reactivate, unfreeze ─────────
+
+    /**
+     * Why a user is held: account status plus the wallet freeze, its reason and any money a refund
+     * or dispute could not take back. A READ — no step-up, no audit row.
+     */
+    @GetMapping("/users/{userId}/account-state")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public AccountStateView accountState(@PathVariable UUID userId) {
+        return adminService.accountState(userId);
+    }
+
+    /**
+     * Reactivate a suspended account (a chargeback hold or a content review). Step-up gated; the
+     * hash binds the target user only. Entitlements refuses any account that is not suspended
+     * (banned, waitlisted, soft-deleted, active) and the caller gets {@code 409 not_suspended}.
+     */
+    @PostMapping("/users/{userId}/unsuspend")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<Object> unsuspend(@PathVariable UUID userId,
+                                            @Valid @RequestBody AccountHoldReleaseBody body,
+                                            @RequestHeader(value = STEP_UP_TOKEN_HEADER, required = false)
+                                            String stepUpToken,
+                                            @AuthenticationPrincipal Jwt jwt,
+                                            HttpServletRequest request) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        AdminCommand command = new AdminCommand(actorOf(jwt), userId,
+                STEP_UP_ACTION_UNSUSPEND, stepUpToken, params);
+        AdminService.UnsuspendOutcome outcome = adminService.unsuspend(command);
+        if (!outcome.success() && outcome.rejectionReason() == null && outcome.accountStatus() != null) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "error", "not_suspended", "code", "NOT_SUSPENDED",
+                    "accountStatus", outcome.accountStatus()));
+        }
+        if (!outcome.success()) {
+            return stepUpRejectionResponse(outcome.rejectionReason(), STEP_UP_ACTION_UNSUSPEND, params);
+        }
+
+        Map<String, Object> newValue = new LinkedHashMap<>();
+        newValue.put("accountStatus", outcome.accountStatus());
+        newValue.put("note", body.note());
+        auditEventWriter.writeAllow(actorOf(jwt), ACTION_ACCOUNT_REACTIVATE, RESOURCE_USER,
+                userId.toString(), null, newValue, clientIp(request));
+        return ResponseEntity.ok(
+                new AccountReactivatedView(userId, outcome.accountStatus(), outcome.auditEntryId()));
+    }
+
+    /**
+     * Lift the user's wallet freeze. Step-up gated; the hash binds {@code {ownerType, ownerId}} and
+     * billing verifies and spends the token. Lifting a freeze does not settle unrecovered money —
+     * the account-state read shows it so staff decide with it on screen.
+     */
+    @PostMapping("/users/{userId}/wallet/unfreeze")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<Object> unfreezeWallet(@PathVariable UUID userId,
+                                                 @Valid @RequestBody AccountHoldReleaseBody body,
+                                                 @RequestHeader(value = STEP_UP_TOKEN_HEADER, required = false)
+                                                 String stepUpToken,
+                                                 @AuthenticationPrincipal Jwt jwt,
+                                                 HttpServletRequest request) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("ownerType", OWNER_TYPE_USER);
+        params.put("ownerId", userId.toString());
+        AdminCommand command = new AdminCommand(actorOf(jwt), userId,
+                STEP_UP_ACTION_WALLET_UNFREEZE, stepUpToken, params);
+        AdminService.WalletUnfreezeOutcome outcome = adminService.unfreezeWallet(command, body.note());
+        if (!outcome.success()) {
+            return stepUpRejectionResponse(outcome.rejectionReason(), STEP_UP_ACTION_WALLET_UNFREEZE, params);
+        }
+
+        Map<String, Object> newValue = new LinkedHashMap<>();
+        newValue.put("lifted", outcome.lifted());
+        newValue.put("note", body.note());
+        auditEventWriter.writeAllow(actorOf(jwt), ACTION_WALLET_UNFREEZE, RESOURCE_USER,
+                userId.toString(), null, newValue, clientIp(request));
+        return ResponseEntity.ok(new WalletUnfrozenView(userId, outcome.lifted()));
     }
 
     // ───────── 4. PATCH set platform-admin flag ─────────

@@ -16,6 +16,7 @@ vi.mock('../api.js', () => ({
     otpVerify: (...a) => otpVerify(...a),
     refund: (...a) => refund(...a),
     forceResolveReversed: (...a) => forceResolveReversed(...a),
+    accountState: async () => ({ accountStatus: 'ACTIVE', walletFrozen: false, unrecoveredCents: 0 }),
   },
 }))
 

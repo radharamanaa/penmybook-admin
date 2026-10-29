@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api.js'
 import { useScrollIntoViewOnPhone } from '../useScrollIntoViewOnPhone.js'
@@ -141,6 +141,57 @@ export default function Users() {
   )
 }
 
+const SUSPENDED_STATUSES = new Set(['SUSPENDED', 'SUSPENDED_FOR_REVIEW'])
+const HOLD_NOTE_MIN_LENGTH = 8
+
+function formatDollars(cents) {
+  return `$${(cents / 100).toFixed(2)}`
+}
+
+/**
+ * Why the user is held (account suspension, wallet freeze, money a refund or dispute could not
+ * take back) and the two OTP lifts (F3). Reactivation is offered only for a suspension:
+ * entitlements refuses any other status anyway.
+ */
+function HoldPanel({ state, note, onNoteChange, onReactivate, onUnfreeze }) {
+  if (!state) return null
+  const suspended = SUSPENDED_STATUSES.has(state.accountStatus)
+  const held = suspended || state.walletFrozen
+  if (!held) {
+    return <p className="sub">No hold on this account.</p>
+  }
+  const noteReady = note.trim().length >= HOLD_NOTE_MIN_LENGTH
+  return (
+    <div className="msg error" role="status">
+      <p style={{ marginTop: 0 }}>
+        Account: <span className="hold-status">
+          {(state.accountStatus ?? 'unknown').toLowerCase().replaceAll('_', ' ')}
+        </span>
+        {state.walletFrozen && <> · Wallet frozen (<code>{state.walletFrozenReason}</code>)</>}
+      </p>
+      {state.unrecoveredCents > 0 && (
+        <p>
+          {formatDollars(state.unrecoveredCents)} could not be taken back by a refund or dispute
+          (already spent). Unfreezing does not settle it.
+        </p>
+      )}
+      <div className="row">
+        <div>
+          <label htmlFor="hold-note">Why are you lifting the hold?</label>
+          <input id="hold-note" value={note} onChange={(e) => onNoteChange(e.target.value)}
+                 placeholder="e.g. dispute du_… won in Stripe" />
+        </div>
+        {suspended && (
+          <button disabled={!noteReady} onClick={onReactivate}>Start OTP reactivate account</button>
+        )}
+        {state.walletFrozen && (
+          <button disabled={!noteReady} onClick={onUnfreeze}>Start OTP unfreeze wallet</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
                        refundRequestIdReadOnly = false, onDone, onError }) {
   const [topUp, setTopUp] = useState('')
@@ -149,16 +200,34 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
   const [refundCents, setRefundCents] = useState('')
   const [refundRequestId, setRefundRequestId] = useState(initialRefundRequestId)
   const [reverseNote, setReverseNote] = useState('')
-  // OTP flow state: which action is mid-challenge + the challenge id + code.
-  const [otp, setOtp] = useState(null) // {action, challengeId, params}
+  // OTP flow state: which action is mid-challenge + the challenge id + code. `note` rides along
+  // for the hold lifts but is NOT in `params`: params are exactly what the server hashes.
+  const [otp, setOtp] = useState(null) // {action, challengeId, params, note}
   const [code, setCode] = useState('')
   const otpRowRef = useRef(null)
   useScrollIntoViewOnPhone(otpRowRef, otp)
+  const [holdState, setHoldState] = useState(null)
+  const [holdError, setHoldError] = useState(null)
+  const [holdNote, setHoldNote] = useState('')
 
-  async function startOtp(action, params) {
+  // Depends on the user only: the parent's onDone/onError are new functions on every render, so
+  // reporting through them here would refetch on every parent render.
+  const loadHoldState = useCallback(async () => {
+    try {
+      setHoldState(await api.accountState(user.userId))
+      setHoldError(null)
+    } catch (err) {
+      setHoldState(null)
+      setHoldError(err.message)
+    }
+  }, [user.userId])
+
+  useEffect(() => { loadHoldState() }, [loadHoldState])
+
+  async function startOtp(action, params, note = null) {
     try {
       const resp = await api.otpStart(action, user.userId, params)
-      setOtp({ action, challengeId: resp.challengeId, params })
+      setOtp({ action, challengeId: resp.challengeId, params, note })
       setCode('')
     } catch (err) { onError(err.message) }
   }
@@ -173,6 +242,14 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
       } else if (otp.action === 'wallet_top_up') {
         await api.walletTopUp(user.userId, otp.params.amountCents, 'admin top-up', v.stepUpToken)
         onDone(`Topped up ${otp.params.amountCents}¢ for ${user.email}`)
+      } else if (otp.action === 'unsuspend') {
+        const r = await api.unsuspend(user.userId, otp.note, v.stepUpToken)
+        onDone(`${user.email} is ${r.accountStatus} again.`)
+        await loadHoldState()
+      } else if (otp.action === 'wallet_unfreeze') {
+        const r = await api.unfreezeWallet(user.userId, otp.note, v.stepUpToken)
+        onDone(r.lifted ? `Wallet unfrozen for ${user.email}.` : `The wallet of ${user.email} was not frozen.`)
+        await loadHoldState()
       } else if (otp.params.forceResolve) {
         const r = await api.forceResolveReversed(
           user.userId, otp.params.paymentId, otp.params.note, v.stepUpToken)
@@ -183,7 +260,12 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
         onDone(`Refund issued for payment ${otp.params.paymentId}`)
       }
       setOtp(null)
-    } catch (err) { onError(err.message) }
+    } catch (err) {
+      onError(err.message)
+      // A refused or timed-out lift may still have changed the hold (billing unfroze, then the
+      // reply was lost): re-read it so the panel never offers a lift that is already done.
+      if (otp.action === 'unsuspend' || otp.action === 'wallet_unfreeze') await loadHoldState()
+    }
   }
 
   async function togglePlatformAdmin() {
@@ -196,6 +278,14 @@ function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
   return (
     <div className="panel">
       <h2 style={{ marginTop: 0 }}>Manage <code>{user.email}</code></h2>
+
+      {holdError && (
+        <div className="msg error">Could not read this user&apos;s holds: {holdError}</div>
+      )}
+      <HoldPanel state={holdState} note={holdNote} onNoteChange={setHoldNote}
+                 onReactivate={() => startOtp('unsuspend', {}, holdNote.trim())}
+                 onUnfreeze={() => startOtp('wallet_unfreeze',
+                   { ownerType: 'USER', ownerId: user.userId }, holdNote.trim())} />
 
       <div className="row">
         <div>

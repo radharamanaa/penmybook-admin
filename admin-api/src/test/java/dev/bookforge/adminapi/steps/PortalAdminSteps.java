@@ -150,6 +150,177 @@ public class PortalAdminSteps {
         return StepUpTokenMinter.validFor("wallet_top_up", paramsHash);
     }
 
+    // ───────── Account holds: read, reactivate, unfreeze ─────────
+
+    private static final String HOLD_NOTE = "dispute won in Stripe";
+
+    @Given("the target user is suspended for review with a frozen wallet and {long} cents unrecovered")
+    public void targetHeldByDispute(long unrecoveredCents) {
+        AdminWireMock.server().stubFor(get(urlPathEqualTo("/internal/admin/users/" + TARGET_USER + "/status"))
+                .atPriority(1)
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"accountStatus\":\"SUSPENDED_FOR_REVIEW\"}")));
+        AdminWireMock.server().stubFor(get(urlPathEqualTo("/internal/admin/wallet/summary"))
+                .atPriority(1)
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"walletExists\":true,\"balanceCents\":0,\"moneyInCents\":1000,"
+                                + "\"consumeRefundCents\":0,\"paymentClawbackCents\":1000,"
+                                + "\"stripeCashGrossCents\":1000,\"stripeCardRefundedCents\":0,"
+                                + "\"frozen\":true,\"frozenReason\":\"dispute:du_test\","
+                                + "\"unrecoveredCents\":" + unrecoveredCents + "}")));
+    }
+
+    @Given("entitlements reports the target user is {string} and not suspended")
+    public void entitlementsRefusesUnsuspend(String status) {
+        AdminWireMock.server().stubFor(post(urlMatching("/internal/admin/unsuspend"))
+                .atPriority(1)
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"success\":false,\"auditEntryId\":null,\"accountStatus\":\"" + status + "\"}")));
+    }
+
+    @When("they read the target user's account state")
+    public void readAccountState() {
+        lastResponse = sendGet("/v1/admin/users/" + TARGET_USER + "/account-state");
+    }
+
+    @When("they reactivate the target user with a valid step-up token")
+    public void reactivateWithToken() {
+        reactivate(boundToken("unsuspend", TARGET_USER, Map.of()));
+    }
+
+    @When("they reactivate the target user without a step-up token")
+    public void reactivateWithoutToken() {
+        reactivate(null);
+    }
+
+    @When("they reactivate the target user with a token approved for another user")
+    public void reactivateWithForeignToken() {
+        reactivate(boundToken("unsuspend", UUID.randomUUID(), Map.of()));
+    }
+
+    @When("they attempt to reactivate the target user")
+    public void attemptReactivate() {
+        reactivate(null);
+    }
+
+    private void reactivate(String stepUpToken) {
+        lastResponse = sendWithStepUp(HttpMethod.POST, "/v1/admin/users/" + TARGET_USER + "/unsuspend",
+                Map.of("note", HOLD_NOTE), stepUpToken);
+    }
+
+    @When("they unfreeze the target user's wallet with a valid step-up token")
+    public void unfreezeWithToken() {
+        unfreeze(boundToken("wallet_unfreeze", TARGET_USER, walletParams(TARGET_USER)));
+    }
+
+    @When("they unfreeze the target user's wallet without a step-up token")
+    public void unfreezeWithoutToken() {
+        unfreeze(null);
+    }
+
+    @When("they unfreeze the target user's wallet with a token approved for another user")
+    public void unfreezeWithForeignToken() {
+        UUID other = UUID.randomUUID();
+        unfreeze(boundToken("wallet_unfreeze", other, walletParams(other)));
+    }
+
+    @When("they attempt to unfreeze the target user's wallet")
+    public void attemptUnfreeze() {
+        unfreeze(null);
+    }
+
+    @When("they unfreeze the target user's wallet twice with the same step-up token")
+    public void unfreezeTwiceWithOneToken() {
+        String token = boundToken("wallet_unfreeze", TARGET_USER, walletParams(TARGET_USER));
+        unfreeze(token);
+        unfreeze(token);
+    }
+
+    @When("they unfreeze the target user's wallet with a reactivation token")
+    public void unfreezeWithReactivationToken() {
+        unfreeze(boundToken("unsuspend", TARGET_USER, walletParams(TARGET_USER)));
+    }
+
+    @Given("billing refuses the wallet unfreeze")
+    public void billingRefusesUnfreeze() {
+        AdminWireMock.server().stubFor(post(urlPathEqualTo("/internal/admin/wallet/unfreeze"))
+                .atPriority(1)
+                .willReturn(aResponse().withStatus(403).withHeader("Content-Type", "application/json")
+                        .withBody("{\"error\":\"step_up_rejected\"}")));
+    }
+
+    @Then("billing was asked to unfreeze {int} times")
+    public void billingUnfreezeCalledTimes(int times) {
+        AdminWireMock.server().verify(times, postRequestedFor(urlPathEqualTo("/internal/admin/wallet/unfreeze")));
+    }
+
+    private void unfreeze(String stepUpToken) {
+        AdminWireMock.server().stubFor(post(urlPathEqualTo("/internal/admin/wallet/unfreeze"))
+                .atPriority(5)
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"lifted\":true}")));
+        lastResponse = sendWithStepUp(HttpMethod.POST,
+                "/v1/admin/users/" + TARGET_USER + "/wallet/unfreeze", Map.of("note", HOLD_NOTE), stepUpToken);
+    }
+
+    private static Map<String, Object> walletParams(UUID ownerId) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("ownerType", "USER");
+        params.put("ownerId", ownerId.toString());
+        return params;
+    }
+
+    private String boundToken(String action, UUID target, Map<String, Object> params) {
+        return StepUpTokenMinter.validFor(action, paramsHasher.compute(action, staffUserId, target, params));
+    }
+
+    @Then("the account state shows {string}, a frozen wallet for {string} and {long} cents unrecovered")
+    public void accountStateShows(String status, String frozenReason, long unrecoveredCents) {
+        JsonNode body = parseBody();
+        assertThat(body.path("userId").asText()).isEqualTo(TARGET_USER.toString());
+        assertThat(body.path("accountStatus").asText()).isEqualTo(status);
+        assertThat(body.path("walletFrozen").asBoolean()).isTrue();
+        assertThat(body.path("walletFrozenReason").asText()).isEqualTo(frozenReason);
+        assertThat(body.path("unrecoveredCents").asLong()).isEqualTo(unrecoveredCents);
+    }
+
+    @Then("the reactivated account status is {string}")
+    public void reactivatedStatus(String status) {
+        assertThat(parseBody().path("accountStatus").asText()).isEqualTo(status);
+    }
+
+    @Then("entitlements was asked to unsuspend the target user")
+    public void entitlementsUnsuspendCalled() {
+        AdminWireMock.server().verify(1, postRequestedFor(urlMatching("/internal/admin/unsuspend"))
+                .withRequestBody(matchingJsonPath("$.targetUserId", equalTo(TARGET_USER.toString())))
+                .withRequestBody(matchingJsonPath("$.staffUserId", equalTo(staffUserId.toString()))));
+    }
+
+    @Then("entitlements was not asked to unsuspend anyone")
+    public void entitlementsUnsuspendNotCalled() {
+        AdminWireMock.server().verify(0, postRequestedFor(urlMatching("/internal/admin/unsuspend")));
+    }
+
+    @Then("the wallet unfreeze reports lifted")
+    public void unfreezeLifted() {
+        assertThat(parseBody().path("lifted").asBoolean()).isTrue();
+    }
+
+    @Then("billing was asked to unfreeze the target user's USER wallet with the step-up token")
+    public void billingUnfreezeCalled() {
+        AdminWireMock.server().verify(1, postRequestedFor(urlPathEqualTo("/internal/admin/wallet/unfreeze"))
+                .withRequestBody(matchingJsonPath("$.ownerType", equalTo("USER")))
+                .withRequestBody(matchingJsonPath("$.ownerId", equalTo(TARGET_USER.toString())))
+                .withRequestBody(matchingJsonPath("$.staffUserId", equalTo(staffUserId.toString())))
+                .withRequestBody(matchingJsonPath("$.reason", equalTo(HOLD_NOTE)))
+                .withRequestBody(matchingJsonPath("$.stepUpToken")));
+    }
+
+    @Then("billing was not asked to unfreeze any wallet")
+    public void billingUnfreezeNotCalled() {
+        AdminWireMock.server().verify(0, postRequestedFor(urlPathEqualTo("/internal/admin/wallet/unfreeze")));
+    }
+
     // ───────── When — refund ─────────
 
     @When("they attempt to refund a payment of {long} cents")
@@ -1056,6 +1227,10 @@ public class PortalAdminSteps {
                     postRequestedFor(urlMatching("/internal/refund-requests/.*/resolve")));
             case "REFUND_RESIDUAL_SETTLE" -> AdminWireMock.server().verify(0,
                     postRequestedFor(urlPathEqualTo("/internal/refund-residuals/settle")));
+            case "ACCOUNT_REACTIVATE" -> AdminWireMock.server().verify(0,
+                    postRequestedFor(urlMatching("/internal/admin/unsuspend")));
+            case "WALLET_UNFREEZE" -> AdminWireMock.server().verify(0,
+                    postRequestedFor(urlPathEqualTo("/internal/admin/wallet/unfreeze")));
             default -> {
                 // No-op — unknown action label means the assertion is informational only.
             }

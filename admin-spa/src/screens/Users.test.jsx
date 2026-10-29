@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 
 vi.mock('../api.js', () => ({
-  api: { searchUsers: vi.fn() },
+  api: { searchUsers: vi.fn(), accountState: async () => ({ accountStatus: 'ACTIVE', walletFrozen: false, unrecoveredCents: 0 }), },
 }))
 
 import Users from './Users.jsx'

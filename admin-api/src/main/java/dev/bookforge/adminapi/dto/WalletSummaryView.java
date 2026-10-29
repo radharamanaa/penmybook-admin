@@ -13,5 +13,8 @@ public record WalletSummaryView(
         long consumeRefundCents,
         long paymentClawbackCents,
         long stripeCashGrossCents,
-        long stripeCardRefundedCents
+        long stripeCardRefundedCents,
+        boolean frozen,
+        String frozenReason,
+        long unrecoveredCents
 ) {}

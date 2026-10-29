@@ -72,6 +72,12 @@ public interface DownstreamClient {
      */
     ForceResolveReversedCallResult forceResolveReversed(AdminCommand command);
 
+    /**
+     * billing {@code POST /internal/admin/wallet/unfreeze}. Billing verifies and spends the step-up
+     * token (bound over {@code {ownerType, ownerId}} from the command params).
+     */
+    WalletUnfreezeCallResult unfreezeWallet(AdminCommand command, String note);
+
     /** read-through account status for the target user (entitlements admin profile). */
     AccountStatusView accountStatus(UUID userId);
 

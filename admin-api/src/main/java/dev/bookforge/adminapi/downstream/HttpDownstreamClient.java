@@ -549,6 +549,28 @@ public class HttpDownstreamClient implements DownstreamClient {
         return new DownstreamResult(false, null, null);
     }
 
+    /**
+     * Billing verifies AND spends the step-up token here (bound over {ownerType, ownerId}), the same
+     * way it does for a refund, so admin-api forwards the token instead of claiming it locally.
+     */
+    @Override
+    @CircuitBreaker(name = CB_BILLING, fallbackMethod = "unfreezeWalletFallback")
+    public WalletUnfreezeCallResult unfreezeWallet(AdminCommand command, String note) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ownerType", String.valueOf(command.params().get("ownerType")));
+        body.put("ownerId", command.targetUserId().toString());
+        body.put("stepUpToken", command.stepUpToken());
+        body.put("staffUserId", command.staffUserId().toString());
+        body.put("reason", note);
+        String url = downstream.billingUrl() + "/internal/admin/wallet/unfreeze";
+        try {
+            JsonNode json = send(url, BILLING_AUD, toJson(body), ADMIN_RPC_TIMEOUT);
+            return WalletUnfreezeCallResult.ok(json.path("lifted").asBoolean(false));
+        } catch (DownstreamCallException e) {
+            return WalletUnfreezeCallResult.failed();
+        }
+    }
+
     @Override
     @CircuitBreaker(name = CB_BILLING, fallbackMethod = "forceResolveReversedFallback")
     public ForceResolveReversedCallResult forceResolveReversed(AdminCommand command) {
@@ -578,6 +600,11 @@ public class HttpDownstreamClient implements DownstreamClient {
         } catch (DownstreamCallException e) {
             return ForceResolveReversedCallResult.failed();
         }
+    }
+
+    public WalletUnfreezeCallResult unfreezeWalletFallback(AdminCommand command, String note, Throwable t) {
+        log.warn("unfreezeWallet short-circuited: {}", t.toString());
+        return WalletUnfreezeCallResult.failed();
     }
 
     public ForceResolveReversedCallResult forceResolveReversedFallback(AdminCommand command, Throwable t) {
@@ -875,7 +902,11 @@ public class HttpDownstreamClient implements DownstreamClient {
                 requireLong(json, "consumeRefundCents", source),
                 requireLong(json, "paymentClawbackCents", source),
                 requireLong(json, "stripeCashGrossCents", source),
-                requireLong(json, "stripeCardRefundedCents", source));
+                requireLong(json, "stripeCardRefundedCents", source),
+                // Freeze fields arrived later: an older billing simply reports "not frozen".
+                json.path("frozen").asBoolean(false),
+                json.hasNonNull("frozenReason") ? json.path("frozenReason").asText() : null,
+                json.path("unrecoveredCents").asLong(0L));
     }
 
     @Override

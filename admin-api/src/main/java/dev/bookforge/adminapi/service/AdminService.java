@@ -10,7 +10,10 @@ import dev.bookforge.adminapi.downstream.HttpDownstreamClient;
 import dev.bookforge.adminapi.downstream.RefundRequestResolveResult;
 import dev.bookforge.adminapi.downstream.RefundResidualSettleResult;
 import dev.bookforge.adminapi.downstream.ServiceAccountTokenFactory;
+import dev.bookforge.adminapi.downstream.WalletUnfreezeCallResult;
+import dev.bookforge.adminapi.dto.AccountStateView;
 import dev.bookforge.adminapi.dto.AccountStatusView;
+import dev.bookforge.adminapi.dto.WalletSummaryView;
 import dev.bookforge.adminapi.dto.AdminActionResult;
 import dev.bookforge.adminapi.dto.AdminCommand;
 import dev.bookforge.adminapi.dto.OrgView;
@@ -60,6 +63,16 @@ public class AdminService {
     private static final String RESOLVE_REFUND_REQUEST = "resolve_refund_request";
     private static final String SETTLE_REFUND_RESIDUAL = "settle_refund_residual";
     private static final String WALLET_TOP_UP = "wallet_top_up";
+    private static final String WALLET_UNFREEZE = "wallet_unfreeze";
+
+    /**
+     * Actions whose step-up token billing verifies AND spends in its own {@code step_up_consumption}
+     * ledger. admin-api checks them but does not claim them, so a 502 cannot leave an approval
+     * that is spent here yet never used there (G1).
+     */
+    private static final java.util.Set<String> BILLING_SPENDS_TOKEN = java.util.Set.of(REFUND, WALLET_UNFREEZE);
+
+    private static final String USER_OWNER_TYPE = "USER";
 
     private static final String REJECT_STEP_UP_REQUIRED = "step_up_required";
     private static final String REJECT_STEP_UP_INVALID = "step_up_invalid";
@@ -128,8 +141,97 @@ public class AdminService {
         return runWrite(SUSPEND, command, downstream::suspend);
     }
 
-    public AdminActionResult unsuspend(AdminCommand command) {
-        return runWrite(UNSUSPEND, command, downstream::unsuspend);
+    /**
+     * Reactivate a suspended account (a chargeback hold or a content review). Entitlements only
+     * lifts SUSPENDED / SUSPENDED_FOR_REVIEW; for any other status it answers success=false with
+     * the current status, which comes back here as {@link UnsuspendOutcome#notSuspended}.
+     */
+    public UnsuspendOutcome unsuspend(AdminCommand command) {
+        StepUpVerifier.Result gate = gate(UNSUSPEND, command);
+        if (gate instanceof StepUpVerifier.Result.Missing) {
+            return UnsuspendOutcome.rejected(REJECT_STEP_UP_REQUIRED);
+        }
+        if (!(gate instanceof StepUpVerifier.Result.Valid)) {
+            return UnsuspendOutcome.rejected(REJECT_STEP_UP_INVALID);
+        }
+        DownstreamResult result = callDownstream(
+                () -> downstream.unsuspend(command),
+                () -> new DownstreamResult(false, null, null));
+        if (result.success()) {
+            return UnsuspendOutcome.reactivated(result.auditEntryId(), result.accountStatus());
+        }
+        return result.accountStatus() == null
+                ? UnsuspendOutcome.downstreamRejected()
+                : UnsuspendOutcome.notSuspended(result.accountStatus());
+    }
+
+    /**
+     * Lift a wallet freeze. The token is bound over {@code {ownerType, ownerId}} (the command's
+     * params) and spent by billing, not here.
+     */
+    public WalletUnfreezeOutcome unfreezeWallet(AdminCommand command, String note) {
+        StepUpVerifier.Result gate = gate(WALLET_UNFREEZE, command);
+        if (gate instanceof StepUpVerifier.Result.Missing) {
+            return WalletUnfreezeOutcome.rejected(REJECT_STEP_UP_REQUIRED);
+        }
+        if (!(gate instanceof StepUpVerifier.Result.Valid)) {
+            return WalletUnfreezeOutcome.rejected(REJECT_STEP_UP_INVALID);
+        }
+        WalletUnfreezeCallResult result = callDownstream(
+                () -> downstream.unfreezeWallet(command, note),
+                WalletUnfreezeCallResult::failed);
+        return result.success()
+                ? WalletUnfreezeOutcome.done(result.lifted())
+                : WalletUnfreezeOutcome.downstreamRejected();
+    }
+
+    /** Account status (entitlements) plus the wallet's freeze and unrecovered money (billing). */
+    public AccountStateView accountState(UUID userId) {
+        AccountStatusView status = downstream.accountStatus(userId);
+        WalletSummaryView wallet = downstream.walletSummary(USER_OWNER_TYPE, userId);
+        return new AccountStateView(userId, status.accountStatus(), wallet.walletExists(),
+                wallet.balanceCents(), wallet.frozen(), wallet.frozenReason(), wallet.unrecoveredCents());
+    }
+
+    /**
+     * Outcome of a reactivation. {@code rejectionReason} is the step-up code; {@code accountStatus}
+     * without success means the account was not suspended (nothing changed); both null means the
+     * downstream failed.
+     */
+    public record UnsuspendOutcome(boolean success, UUID auditEntryId, String accountStatus,
+                                   String rejectionReason) {
+
+        static UnsuspendOutcome reactivated(UUID auditEntryId, String accountStatus) {
+            return new UnsuspendOutcome(true, auditEntryId, accountStatus, null);
+        }
+
+        static UnsuspendOutcome notSuspended(String accountStatus) {
+            return new UnsuspendOutcome(false, null, accountStatus, null);
+        }
+
+        static UnsuspendOutcome rejected(String reason) {
+            return new UnsuspendOutcome(false, null, null, reason);
+        }
+
+        static UnsuspendOutcome downstreamRejected() {
+            return new UnsuspendOutcome(false, null, null, null);
+        }
+    }
+
+    /** Outcome of a wallet unfreeze; {@code lifted=false} on success means it was not frozen. */
+    public record WalletUnfreezeOutcome(boolean success, boolean lifted, String rejectionReason) {
+
+        static WalletUnfreezeOutcome done(boolean lifted) {
+            return new WalletUnfreezeOutcome(true, lifted, null);
+        }
+
+        static WalletUnfreezeOutcome rejected(String reason) {
+            return new WalletUnfreezeOutcome(false, false, reason);
+        }
+
+        static WalletUnfreezeOutcome downstreamRejected() {
+            return new WalletUnfreezeOutcome(false, false, null);
+        }
     }
 
     public AdminActionResult flagDeveloper(AdminCommand command) {
@@ -421,10 +523,11 @@ public class AdminService {
             return new StepUpVerifier.Result.Invalid();
         }
 
-        // Billing spends the same token in step_up_consumption (refund + force-resolve). Claiming
-        // here first left a leftover spendable at billing after a 502 (G1). Grant / resolve /
-        // top-up still claim locally because those callees do not spend the full token.
-        if (!REFUND.equals(action)) {
+        // Billing spends the same token in step_up_consumption (refund, force-resolve, wallet
+        // unfreeze). Claiming here first left a leftover spendable at billing after a 502 (G1).
+        // Grant / resolve / top-up / unsuspend still claim locally because those callees do not
+        // spend the full token.
+        if (!BILLING_SPENDS_TOKEN.contains(action)) {
             if (!tokenStore.markConsumedOnce(valid.challengeId(), valid.expiresAtEpoch())) {
                 return new StepUpVerifier.Result.Invalid();
             }

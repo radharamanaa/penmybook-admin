@@ -131,6 +131,20 @@ export const api = {
         : { paymentId, amountCents, reason },
       headers: { 'X-Step-Up-Token': stepUpToken },
     }),
+  // ── account holds (F3): why a user is held, and the two step-up lifts ──
+  accountState: (userId) => request(`/api/v1/admin/users/${userId}/account-state`),
+  unsuspend: (userId, note, stepUpToken) =>
+    request(`/api/v1/admin/users/${userId}/unsuspend`, {
+      method: 'POST',
+      body: { note },
+      headers: { 'X-Step-Up-Token': stepUpToken },
+    }),
+  unfreezeWallet: (userId, note, stepUpToken) =>
+    request(`/api/v1/admin/users/${userId}/wallet/unfreeze`, {
+      method: 'POST',
+      body: { note },
+      headers: { 'X-Step-Up-Token': stepUpToken },
+    }),
   forceResolveReversed: (userId, paymentId, note, stepUpToken) =>
     request(`/api/v1/admin/users/${userId}/payments/${paymentId}/force-resolve-reversed`, {
       method: 'POST',
