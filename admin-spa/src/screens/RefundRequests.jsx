@@ -26,6 +26,58 @@ function fmtCents(cents) {
   return `$${(cents / 100).toFixed(2)}`
 }
 
+function payoutHref(row, paymentId, amountCents) {
+  const params = new URLSearchParams({
+    refundRequestId: row.id,
+    ownerType: row.ownerType,
+    ownerId: row.ownerId,
+  })
+  if (row.ownerEmail) params.set('ownerEmail', row.ownerEmail)
+  if (paymentId) params.set('paymentId', paymentId)
+  if (amountCents) params.set('amountCents', String(amountCents))
+  return `/users?${params}`
+}
+
+/**
+ * An approved request is paid out payment by payment (approval moves no money). Splits what is
+ * still owed across the in-window payments, billing's suggested one first, so each link opens the
+ * payout form filled in. Out-of-window payments are listed but never offered (P1, 28 Oct 2026).
+ */
+function PayoutLinks({ row }) {
+  const payments = row.payments ?? []
+  if (payments.length === 0) {
+    return <Link className="small" to={payoutHref(row)}>Pay out</Link>
+  }
+  const ordered = [...payments].sort((a, b) =>
+    (b.paymentId === row.suggestedPaymentId) - (a.paymentId === row.suggestedPaymentId))
+  let owed = Math.max(0, (row.approvedAmountCents ?? 0) - (row.refundedCents ?? 0))
+  const links = []
+  for (const payment of ordered) {
+    if (!payment.inWindow || payment.remainingCents <= 0 || owed <= 0) continue
+    const amount = Math.min(payment.remainingCents, owed)
+    owed -= amount
+    links.push(
+      <Link key={payment.paymentId} className="small" to={payoutHref(row, payment.paymentId, amount)}>
+        Pay out {fmtCents(amount)} from …{payment.paymentId.slice(-4)}
+      </Link>,
+    )
+  }
+  const outOfWindow = payments.filter((p) => !p.inWindow).length
+  if (links.length === 0) {
+    // Nothing payable to a card (all past 120 days, or nothing owed): the bare link is still the way
+    // to close the request — a payout attempt settles it as unpayable.
+    links.push(<Link key="bare" className="small" to={payoutHref(row)}>Pay out</Link>)
+  }
+  return (
+    <div style={{ display: 'grid', gap: 4 }}>
+      {links}
+      {outOfWindow > 0 && (
+        <span className="sub">{outOfWindow} payment(s) past the 120-day card-refund limit</span>
+      )}
+    </div>
+  )
+}
+
 function ageOf(iso) {
   if (!iso) return '—'
   const then = new Date(iso).getTime()
@@ -223,6 +275,7 @@ export default function RefundRequests() {
                 <th role="columnheader">Asked</th>
                 <th role="columnheader">Quoted refundable</th>
                 <th role="columnheader">Live refundable</th>
+                <th role="columnheader">Approved</th>
                 <th role="columnheader">Refunded</th>
                 <th role="columnheader">Residual</th>
                 <th role="columnheader">Reason</th>
@@ -245,9 +298,12 @@ export default function RefundRequests() {
                       {row.status}
                     </span>
                   </td>
-                  <td role="cell" data-label="Asked">{fmtCents(row.requestedAmountCents)}</td>
+                  <td role="cell" data-label="Asked">
+                    {row.requestedAmountCents == null ? 'All refundable' : fmtCents(row.requestedAmountCents)}
+                  </td>
                   <td role="cell" data-label="Quoted refundable">{fmtCents(row.snapshotRefundableCents)}</td>
                   <td role="cell" data-label="Live refundable">{fmtCents(row.liveRefundableCents)}</td>
+                  <td role="cell" data-label="Approved">{fmtCents(row.approvedAmountCents)}</td>
                   <td role="cell" data-label="Refunded">{fmtCents(row.refundedCents)}</td>
                   <td role="cell" data-label="Residual">{fmtCents(row.residualCents)}</td>
                   <td role="cell" data-label="Reason" style={{ maxWidth: 240, whiteSpace: 'pre-wrap' }}>{row.reason || '—'}</td>
@@ -263,14 +319,7 @@ export default function RefundRequests() {
                         </button>
                       </div>
                     )}
-                    {row.status === 'APPROVED' && (
-                      <Link
-                        className="small"
-                        to={`/users?refundRequestId=${encodeURIComponent(row.id)}&ownerType=${encodeURIComponent(row.ownerType)}&ownerId=${encodeURIComponent(row.ownerId)}${row.ownerEmail ? `&ownerEmail=${encodeURIComponent(row.ownerEmail)}` : ''}`}
-                      >
-                        Pay out
-                      </Link>
-                    )}
+                    {row.status === 'APPROVED' && <PayoutLinks row={row} />}
                   </td>
                 </tr>
               ))}
@@ -346,7 +395,7 @@ export default function RefundRequests() {
               <input value={otp.params.decision} readOnly />
             </div>
             <div>
-              <label>Amount (cents; empty = everything live-refundable)</label>
+              <label>Amount (cents; empty = what the user asked, capped at live refundable)</label>
               <input value={otp.params.amountCents ?? ''} readOnly />
             </div>
           </div>
@@ -406,7 +455,7 @@ export default function RefundRequests() {
 
       {!otp && (
         <div className="panel" style={{ marginTop: 16 }}>
-          <label>Approval amount (cents; leave blank for everything currently refundable)</label>
+          <label>Approval amount (cents; leave blank for the amount the user asked, or everything they can get back if they asked for everything)</label>
           <input
             type="number"
             inputMode="numeric"

@@ -95,3 +95,9 @@ Feature: Resolving a user's refund request is platform-admin only and step-up ga
     When they reject a refund request
     Then the response status is 200
     And the audit log has an ALLOW row for action "REFUND_REQUEST_RESOLVE"
+
+  Scenario: The queue carries the payments an approved request is paid out against
+    Given a platform admin is signed in
+    When they view an approved refund request with two refundable payments
+    Then the response status is 200
+    And the request lists 2 payments with the suggested one first in the payload

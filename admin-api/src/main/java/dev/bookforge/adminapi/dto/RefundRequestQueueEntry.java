@@ -1,6 +1,7 @@
 package dev.bookforge.adminapi.dto;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -28,5 +29,9 @@ public record RefundRequestQueueEntry(
         Instant createdAt,
         Instant updatedAt,
         String ownerName,
-        String ownerEmail
+        String ownerEmail,
+        // The payments an approved request is paid out against, and the one billing suggests first.
+        // admin-api used to drop both, so "Pay out" could not name a payment (refund-flow test P1).
+        List<RefundRequestPaymentEntry> payments,
+        UUID suggestedPaymentId
 ) {}

@@ -611,6 +611,40 @@ public class PortalAdminSteps {
                                 + "\"updatedAt\":\"2026-08-25T10:00:00Z\"}]")));
     }
 
+    private static final UUID PAYOUT_PAYMENT_A = UUID.fromString("44444444-4444-4444-4444-444444444441");
+    private static final UUID PAYOUT_PAYMENT_B = UUID.fromString("44444444-4444-4444-4444-444444444442");
+
+    @When("they view an approved refund request with two refundable payments")
+    public void viewApprovedRequestWithPayments() {
+        AdminWireMock.server().stubFor(get(urlMatching("/internal/refund-requests.*"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("[{\"id\":\"" + UUID.randomUUID() + "\",\"ownerType\":\"USER\","
+                                + "\"ownerId\":\"" + TARGET_USER + "\",\"status\":\"APPROVED\","
+                                + "\"requestedAmountCents\":874,\"reason\":\"test\","
+                                + "\"snapshotRefundableCents\":874,\"liveRefundableCents\":874,"
+                                + "\"approvedAmountCents\":874,"
+                                + "\"createdAt\":\"2026-10-28T16:55:00Z\",\"updatedAt\":\"2026-10-28T16:58:00Z\","
+                                + "\"suggestedPaymentId\":\"" + PAYOUT_PAYMENT_A + "\","
+                                + "\"payments\":["
+                                + "{\"paymentId\":\"" + PAYOUT_PAYMENT_A + "\",\"createdAt\":\"2026-10-27T14:20:58Z\","
+                                + "\"remainingCents\":1000,\"inWindow\":true},"
+                                + "{\"paymentId\":\"" + PAYOUT_PAYMENT_B + "\",\"createdAt\":\"2026-10-27T14:04:36Z\","
+                                + "\"remainingCents\":1000,\"inWindow\":true}]}]")));
+        lastResponse = send(HttpMethod.GET, "/v1/admin/refund-requests?status=APPROVED&limit=50", null);
+    }
+
+    @Then("the request lists {int} payments with the suggested one first in the payload")
+    public void requestListsPayments(int count) {
+        JsonNode row = parseBody().path("requests").get(0);
+        assertThat(row.path("payments")).hasSize(count);
+        assertThat(row.path("payments").get(0).path("paymentId").asText()).isEqualTo(PAYOUT_PAYMENT_A.toString());
+        assertThat(row.path("payments").get(0).path("remainingCents").asLong()).isEqualTo(1000L);
+        assertThat(row.path("payments").get(0).path("inWindow").asBoolean()).isTrue();
+        assertThat(row.path("suggestedPaymentId").asText()).isEqualTo(PAYOUT_PAYMENT_A.toString());
+    }
+
     @When("they view the refund-request queue while billing is unavailable")
     public void viewRefundRequestQueueBillingDown() {
         AdminWireMock.server().stubFor(get(urlMatching("/internal/refund-requests.*"))

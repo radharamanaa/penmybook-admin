@@ -11,6 +11,7 @@ import dev.bookforge.adminapi.dto.OrgPricingRuleView;
 import dev.bookforge.adminapi.dto.OrgView;
 import dev.bookforge.adminapi.dto.PaymentHealthView;
 import dev.bookforge.adminapi.dto.PlatformAdminUpdateView;
+import dev.bookforge.adminapi.dto.RefundRequestPaymentEntry;
 import dev.bookforge.adminapi.dto.RefundRequestQueueEntry;
 import dev.bookforge.adminapi.dto.RefundRequestQueueView;
 import dev.bookforge.adminapi.dto.RefundResidualEntry;
@@ -262,13 +263,40 @@ public class HttpDownstreamClient implements DownstreamClient {
                         parseInstant(n.path("createdAt").asText(null)),
                         parseInstant(n.path("updatedAt").asText(null)),
                         null,
-                        null));
+                        null,
+                        refundRequestPayments(n.path("payments")),
+                        optionalUuid(n, "suggestedPaymentId")));
             }
             return enrichIdentities(new RefundRequestQueueView(false, false, status, rows));
         } catch (DownstreamCallException e) {
             log.warn("refund-request queue unavailable: {}", e.getMessage());
             return new RefundRequestQueueView(true, false, status, List.of());
         }
+    }
+
+    /** Billing's {@code payments} array on a staff refund-request row; missing or malformed → empty. */
+    private List<RefundRequestPaymentEntry> refundRequestPayments(JsonNode array) {
+        List<RefundRequestPaymentEntry> payments = new ArrayList<>();
+        if (array == null || !array.isArray()) {
+            return payments;
+        }
+        for (JsonNode p : array) {
+            UUID paymentId;
+            try {
+                paymentId = optionalUuid(p, "paymentId");
+            } catch (IllegalArgumentException malformed) {
+                log.warn("refund-request queue: skipping a payment with a malformed id");
+                continue;
+            }
+            if (paymentId == null) {
+                continue;
+            }
+            payments.add(new RefundRequestPaymentEntry(paymentId,
+                    parseInstant(p.path("createdAt").asText(null)),
+                    p.path("remainingCents").asLong(0L),
+                    p.path("inWindow").asBoolean(false)));
+        }
+        return payments;
     }
 
     /** Open-breaker / unexpected failure: same envelope as a billing outage, never a 500. */
@@ -367,7 +395,7 @@ public class HttpDownstreamClient implements DownstreamClient {
                     row.snapshotRefundableCents(), row.liveRefundableCents(),
                     row.approvedAmountCents(), row.refundedCents(), row.residualCents(),
                     row.resolutionNote(), row.createdAt(), row.updatedAt(),
-                    ownerName, ownerEmail));
+                    ownerName, ownerEmail, row.payments(), row.suggestedPaymentId()));
         }
         return new RefundRequestQueueView(false, identityDegraded.get(), view.status(), enriched);
     }

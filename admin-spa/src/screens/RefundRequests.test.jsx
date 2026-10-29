@@ -105,3 +105,84 @@ describe('RefundRequests queue filters (S7)', () => {
     )
   })
 })
+
+// Refund-flow test (prod, 28 Oct 2026): U1 an "everything" ask showed "—", U4 staff could not see
+// what was approved, P1 "Pay out" named no payment, G2 a blank approval approved the whole balance.
+describe('RefundRequests approved rows (U1, U4, P1, G2)', () => {
+  const NOW = new Date().toISOString()
+  const PAY_A = 'aaaaaaaa-0000-0000-0000-00000000000a'
+  const PAY_B = 'bbbbbbbb-0000-0000-0000-00000000000b'
+  const PAY_OLD = 'cccccccc-0000-0000-0000-00000000000c'
+
+  beforeEach(() => {
+    refundResiduals.mockResolvedValue({ residuals: [], degraded: false })
+  })
+
+  it('shows "All refundable" for an everything request and the approved amount', async () => {
+    refundRequestQueue.mockResolvedValue({
+      degraded: false,
+      requests: [{
+        id: 'r1', ownerType: 'USER', ownerId: 'u1', status: 'APPROVED',
+        requestedAmountCents: null, snapshotRefundableCents: 874, liveRefundableCents: 874,
+        approvedAmountCents: 874, refundedCents: null, reason: 'test', createdAt: NOW,
+        payments: [], suggestedPaymentId: null,
+      }],
+    })
+    renderQueue()
+    expect(await screen.findByRole('columnheader', { name: /^Approved$/ })).toBeInTheDocument()
+    expect(screen.getByText('All refundable')).toBeInTheDocument()
+    const approved = screen.getAllByRole('cell').find((c) => c.getAttribute('data-label') === 'Approved')
+    expect(approved).toHaveTextContent('$8.74')
+  })
+
+  it('offers one pay-out per payment, filled with the amount still owed, suggested payment first', async () => {
+    refundRequestQueue.mockResolvedValue({
+      degraded: false,
+      requests: [{
+        id: 'r2', ownerType: 'USER', ownerId: 'u1', ownerEmail: 'a@b.co', status: 'APPROVED',
+        requestedAmountCents: 1500, snapshotRefundableCents: 2000, liveRefundableCents: 2000,
+        approvedAmountCents: 1500, refundedCents: null, reason: 'test', createdAt: NOW,
+        suggestedPaymentId: PAY_B,
+        payments: [
+          { paymentId: PAY_A, remainingCents: 1000, inWindow: true, createdAt: NOW },
+          { paymentId: PAY_B, remainingCents: 1000, inWindow: true, createdAt: NOW },
+          { paymentId: PAY_OLD, remainingCents: 1000, inWindow: false, createdAt: NOW },
+        ],
+      }],
+    })
+    renderQueue()
+    const links = await screen.findAllByRole('link', { name: /pay out \$/i })
+    expect(links.map((l) => l.textContent)).toEqual([
+      'Pay out $10.00 from …000b',
+      'Pay out $5.00 from …000a',
+    ])
+    expect(links[0].getAttribute('href')).toContain(`paymentId=${PAY_B}`)
+    expect(links[0].getAttribute('href')).toContain('amountCents=1000')
+    expect(links[0].getAttribute('href')).toContain('refundRequestId=r2')
+    expect(links[1].getAttribute('href')).toContain('amountCents=500')
+    expect(screen.getByText(/past the 120-day card-refund limit/i)).toBeInTheDocument()
+  })
+
+  it('keeps a plain pay-out link when every payment is past the 120-day limit', async () => {
+    refundRequestQueue.mockResolvedValue({
+      degraded: false,
+      requests: [{
+        id: 'r3', ownerType: 'USER', ownerId: 'u1', status: 'APPROVED',
+        requestedAmountCents: 1000, snapshotRefundableCents: 1000, liveRefundableCents: 1000,
+        approvedAmountCents: 1000, refundedCents: null, reason: 'old', createdAt: NOW,
+        suggestedPaymentId: null,
+        payments: [{ paymentId: PAY_OLD, remainingCents: 1000, inWindow: false, createdAt: NOW }],
+      }],
+    })
+    renderQueue()
+    const link = await screen.findByRole('link', { name: /^pay out$/i })
+    expect(link.getAttribute('href')).toContain('refundRequestId=r3')
+    expect(link.getAttribute('href')).not.toContain('paymentId=')
+  })
+
+  it('tells staff a blank approval approves what the user asked', async () => {
+    refundRequestQueue.mockResolvedValue({ requests: [], degraded: false })
+    renderQueue()
+    expect(await screen.findByText(/leave blank for the amount the user asked/i)).toBeInTheDocument()
+  })
+})

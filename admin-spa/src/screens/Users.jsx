@@ -17,6 +17,7 @@ export default function Users() {
   const [searchParams] = useSearchParams()
   const linkedRequestId = searchParams.get('refundRequestId') || ''
   const linkedPaymentId = searchParams.get('paymentId') || ''
+  const linkedAmountCents = searchParams.get('amountCents') || ''
   const linkedOwnerId = searchParams.get('ownerId') || ''
   const linkedEmail = searchParams.get('ownerEmail') || ''
   const linkedOwnerType = searchParams.get('ownerType') || ''
@@ -134,6 +135,7 @@ export default function Users() {
         <div ref={actionsRef}>
           <UserActions user={selected}
                        initialPaymentId={linkedPaymentId}
+                       initialRefundCents={linkedAmountCents}
                        initialRefundRequestId={linkedRequestId}
                        refundRequestIdReadOnly={Boolean(linkedRequestId)}
                        onDone={(msg) => showResult(msg, null)}
@@ -205,12 +207,12 @@ function HoldPanel({ state, note, onNoteChange, onReactivate, onUnfreeze }) {
   )
 }
 
-function UserActions({ user, initialPaymentId = '', initialRefundRequestId = '',
+function UserActions({ user, initialPaymentId = '', initialRefundCents = '', initialRefundRequestId = '',
                        refundRequestIdReadOnly = false, onDone, onError }) {
   const [topUp, setTopUp] = useState('')
   const [grant, setGrant] = useState('')
   const [refundPayment, setRefundPayment] = useState(initialPaymentId)
-  const [refundCents, setRefundCents] = useState('')
+  const [refundCents, setRefundCents] = useState(initialRefundCents)
   const [refundRequestId, setRefundRequestId] = useState(initialRefundRequestId)
   const [reverseNote, setReverseNote] = useState('')
   // OTP flow state: which action is mid-challenge + the challenge id + code. `note` rides along

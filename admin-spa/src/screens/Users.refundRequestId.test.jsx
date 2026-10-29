@@ -72,6 +72,21 @@ describe('Users refundRequestId (U4 / S7)', () => {
     )
   })
 
+  it('fills the amount from a per-payment pay-out link (P1)', async () => {
+    renderUsers(
+      `?refundRequestId=${REQUEST_ID}&ownerType=USER&ownerId=u1&ownerEmail=a@b.co`
+        + `&paymentId=${PAYMENT_ID}&amountCents=874`,
+    )
+
+    expect(screen.getByLabelText(/refund amount \(cents\)/i)).toHaveValue(874)
+    await userEvent.click(screen.getByRole('button', { name: /start otp refund/i }))
+    expect(otpStart).toHaveBeenCalledWith('refund', 'u1', {
+      paymentId: PAYMENT_ID,
+      refundAmountCents: 874,
+      refundRequestId: REQUEST_ID,
+    })
+  })
+
   it('does not mint a user from an ORG payout deep-link', () => {
     renderUsers(
       `?refundRequestId=${REQUEST_ID}&ownerType=ORG&ownerId=org-1&ownerEmail=org@b.co&paymentId=${PAYMENT_ID}`,
