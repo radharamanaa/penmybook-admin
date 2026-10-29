@@ -538,7 +538,7 @@ public class PortalAdminSteps {
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")
                         .withBody("{\"status\":\"APPROVED\",\"approvedAmountCents\":" + bodyCents
-                                + ",\"refundedCents\":" + bodyCents + ",\"residualCents\":0}")));
+                                + ",\"refundedCents\":" + bodyCents + "}")));
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("decision", "APPROVE");
@@ -659,7 +659,7 @@ public class PortalAdminSteps {
                 .willReturn(aResponse()
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")
-                        .withBody("{\"status\":\"REJECTED\",\"refundedCents\":0,\"residualCents\":0}")));
+                        .withBody("{\"status\":\"REJECTED\",\"refundedCents\":0}")));
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("decision", "REJECT");
@@ -714,69 +714,38 @@ public class PortalAdminSteps {
         lastResponse = send(HttpMethod.GET, "/v1/admin/refund-requests?status=" + status + "&limit=50", null);
     }
 
-    @When("they view the residual queue")
-    public void viewResidualQueue() {
-        lastResponse = send(HttpMethod.GET, "/v1/admin/refund-residuals", null);
+    @When("they view the unrecovered payments")
+    public void viewUnrecoveredPayments() {
+        lastResponse = send(HttpMethod.GET, "/v1/admin/payments/unrecovered", null);
     }
 
-    @When("they view the residual queue while billing is unavailable")
-    public void viewResidualQueueBillingDown() {
-        AdminWireMock.server().stubFor(get(urlPathEqualTo("/internal/refund-residuals"))
+    @When("they view the unrecovered payments while billing is unavailable")
+    public void viewUnrecoveredPaymentsBillingDown() {
+        AdminWireMock.server().stubFor(get(urlPathEqualTo("/internal/admin/payments/unrecovered"))
                 .willReturn(aResponse().withStatus(503)));
-        lastResponse = send(HttpMethod.GET, "/v1/admin/refund-residuals", null);
+        lastResponse = send(HttpMethod.GET, "/v1/admin/payments/unrecovered", null);
     }
 
-    @When("they settle a residual")
-    public void settleResidual() {
-        settleResidualCall(true);
-    }
-
-    @When("they settle a residual that billing already resolved")
-    public void settleResidualAlreadyResolved() {
-        settleResidualCall(false);
-    }
-
-    private void settleResidualCall(boolean freshlySettled) {
-        UUID residualId = UUID.randomUUID();
-        AdminWireMock.server().stubFor(post(urlPathEqualTo("/internal/refund-residuals/settle"))
-                .willReturn(aResponse()
-                        .withStatus(200)
-                        .withHeader("Content-Type", "application/json")
-                        .withBody("{\"settled\":" + freshlySettled + ",\"residualId\":\""
-                                + residualId + "\"}")));
-        Map<String, Object> params = new LinkedHashMap<>();
-        params.put("residualId", residualId.toString());
-        String paramsHash = paramsHasher.compute(
-                "settle_refund_residual", staffUserId, null, params);
-        String token = StepUpTokenMinter.validFor("settle_refund_residual", paramsHash);
-        lastResponse = sendWithStepUp(HttpMethod.POST,
-                "/v1/admin/refund-residuals/" + residualId + "/settle", Map.of(), token);
-    }
-
-    @When("they start an OTP challenge to settle a residual")
-    public void startSettleResidualOtp() {
-        Map<String, Object> params = new LinkedHashMap<>();
-        params.put("residualId", UUID.randomUUID().toString());
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("action", "settle_refund_residual");
-        body.put("targetUserId", null);
-        body.put("params", params);
-        lastResponse = send(HttpMethod.POST, "/v1/admin/otp/start", body);
-    }
-
-    @Then("the residual queue is not degraded")
-    public void residualQueueNotDegraded() {
+    @Then("the unrecovered payments list is not degraded and shows billing's row")
+    public void unrecoveredPaymentsNotDegraded() {
         JsonNode body = parseBody();
         assertThat(body.path("degraded").asBoolean()).isFalse();
-        assertThat(body.path("residuals").isArray()).isTrue();
+        JsonNode row = body.path("payments").get(0);
+        assertThat(row.path("paymentId").asText()).isEqualTo(AdminWireMock.UNRECOVERED_PAYMENT_ID);
+        assertThat(row.path("ownerType").asText()).isEqualTo("USER");
+        assertThat(row.path("providerPaymentRef").asText()).isEqualTo("pi_unrecovered");
+        assertThat(row.path("status").asText()).isEqualTo("CHARGED_BACK");
+        assertThat(row.path("grossAmountCents").asLong()).isEqualTo(2500L);
+        assertThat(row.path("unrecoveredCents").asLong()).isEqualTo(300L);
+        assertThat(row.path("updatedAt").asText()).isEqualTo("2026-10-20T12:00:00Z");
     }
 
-    @Then("the residual queue is marked degraded rather than empty-and-fine")
-    public void residualQueueMarkedDegraded() {
+    @Then("the unrecovered payments list is marked degraded rather than empty-and-fine")
+    public void unrecoveredPaymentsMarkedDegraded() {
         JsonNode body = parseBody();
         assertThat(body.path("degraded").asBoolean()).isTrue();
-        assertThat(body.path("residuals").isArray()).isTrue();
-        assertThat(body.path("residuals")).isEmpty();
+        assertThat(body.path("payments").isArray()).isTrue();
+        assertThat(body.path("payments")).isEmpty();
     }
 
     @Then("the queue shows both the quoted and the live refundable amount")
@@ -847,13 +816,6 @@ public class PortalAdminSteps {
         AdminWireMock.server().verify(postRequestedFor(urlMatching("/internal/otp/start"))
                 .withRequestBody(matchingJsonPath("$.action",
                         com.github.tomakehurst.wiremock.client.WireMock.equalTo(otpAction))));
-    }
-
-    @Then("entitlements received a residual-settle OTP bound only to the residual id")
-    public void entitlementsReceivedResidualSettleParams() {
-        AdminWireMock.server().verify(postRequestedFor(urlMatching("/internal/otp/start"))
-                .withRequestBody(matchingJsonPath("$.actionParams.residualId"))
-                .withRequestBody(matchingJsonPath("$[?(@.actionParams.targetUserId == null)]")));
     }
 
     @Then("the body tells the operator to refresh and check the status")
@@ -1327,8 +1289,6 @@ public class PortalAdminSteps {
                     postRequestedFor(urlPathMatching("/internal/admin/waitlist/config")));
             case "REFUND_REQUEST_RESOLVE" -> AdminWireMock.server().verify(0,
                     postRequestedFor(urlMatching("/internal/refund-requests/.*/resolve")));
-            case "REFUND_RESIDUAL_SETTLE" -> AdminWireMock.server().verify(0,
-                    postRequestedFor(urlPathEqualTo("/internal/refund-residuals/settle")));
             case "ACCOUNT_REACTIVATE" -> AdminWireMock.server().verify(0,
                     postRequestedFor(urlMatching("/internal/admin/unsuspend")));
             case "WALLET_UNFREEZE" -> AdminWireMock.server().verify(0,

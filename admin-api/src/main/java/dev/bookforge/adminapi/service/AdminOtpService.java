@@ -39,14 +39,12 @@ public class AdminOtpService {
     private static final String ACTION_GRANT_CREDIT = "grant_credit";
     private static final String ACTION_REFUND = "refund";
     private static final String ACTION_RESOLVE_REFUND_REQUEST = "resolve_refund_request";
-    private static final String ACTION_SETTLE_REFUND_RESIDUAL = "settle_refund_residual";
     private static final String ACTION_WALLET_TOP_UP = "wallet_top_up";
     private static final String ACTION_UNSUSPEND = "unsuspend";
     private static final String ACTION_WALLET_UNFREEZE = "wallet_unfreeze";
     private static final String OTP_ACTION_ADMIN_WRITE = "ADMIN_WRITE";
     private static final String OTP_ACTION_REFUND = "REFUND";
     private static final String OTP_ACTION_RESOLVE_REFUND_REQUEST = "RESOLVE_REFUND_REQUEST";
-    private static final String OTP_ACTION_SETTLE_REFUND_RESIDUAL = "SETTLE_REFUND_RESIDUAL";
 
     private final DownstreamClient downstream;
     private final AdminParamsHasher paramsHasher;
@@ -118,7 +116,6 @@ public class AdminOtpService {
                     OTP_ACTION_ADMIN_WRITE;
             case ACTION_REFUND -> OTP_ACTION_REFUND;
             case ACTION_RESOLVE_REFUND_REQUEST -> OTP_ACTION_RESOLVE_REFUND_REQUEST;
-            case ACTION_SETTLE_REFUND_RESIDUAL -> OTP_ACTION_SETTLE_REFUND_RESIDUAL;
             default -> throw new IllegalArgumentException("unsupported admin step-up action: " + action);
         };
     }

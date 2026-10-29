@@ -12,7 +12,7 @@ vi.mock('../api.js', () => ({
     waitlistQueue: vi.fn(),
     listPreAdmits: vi.fn(),
     refundRequestQueue: vi.fn(),
-    refundResiduals: vi.fn(),
+    unrecoveredPayments: vi.fn(),
   },
 }))
 
@@ -69,27 +69,27 @@ describe('card tables', () => {
     tables.forEach(assertCardTable)
   })
 
-  it('Refund requests and residuals', async () => {
+  it('Refund requests and money not recovered', async () => {
     api.refundRequestQueue.mockResolvedValue({
       requests: [{
         id: 'r1', ownerType: 'USER', ownerId: 'u1', status: 'PENDING',
         requestedAmountCents: 1000, snapshotRefundableCents: 1000, liveRefundableCents: 800,
-        refundedCents: 0, residualCents: 0, reason: 'please', createdAt: new Date().toISOString(),
+        refundedCents: 0, reason: 'please', createdAt: new Date().toISOString(),
       }],
       degraded: false,
     })
-    api.refundResiduals.mockResolvedValue({
-      residuals: [{
-        id: 's1', ownerType: 'USER', ownerId: 'u1', amountCents: 200, paymentId: 'pay-1',
-        providerPaymentRef: 'pi_1', reason: 'left over', createdAt: new Date().toISOString(),
+    api.unrecoveredPayments.mockResolvedValue({
+      payments: [{
+        paymentId: 'pay-1', ownerType: 'USER', ownerId: 'u1', providerPaymentRef: 'pi_1',
+        status: 'CHARGED_BACK', grossAmountCents: 2500, unrecoveredCents: 300,
+        updatedAt: new Date().toISOString(),
       }],
       degraded: false,
     })
     render(<MemoryRouter><RefundRequests /></MemoryRouter>)
     await screen.findByText('please')
-    await screen.findByText('left over')
+    await screen.findByText('pi_1')
     expect(screen.getByRole('columnheader', { name: 'Stripe payment' })).toBeInTheDocument()
-    expect(screen.getByText('pi_1')).toBeInTheDocument()
     const tables = document.querySelectorAll('table')
     expect(tables.length).toBe(2)
     tables.forEach(assertCardTable)

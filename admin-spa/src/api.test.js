@@ -171,13 +171,13 @@ describe('api.js', () => {
     })
   })
 
-  describe('settleRefundResidual', () => {
-    it('sends the step-up token and the admin JWT together', async () => {
-      await api.settleRefundResidual('res-1', 'tok-abc')
-      const [, init] = global.fetch.mock.calls[0]
-      expect(init.headers['X-Step-Up-Token']).toBe('tok-abc')
+  describe('unrecoveredPayments', () => {
+    it('reads the admin-api unrecovered-payments list with the admin JWT', async () => {
+      await api.unrecoveredPayments()
+      const [url, init] = global.fetch.mock.calls[0]
+      expect(url).toContain('/api/v1/admin/payments/unrecovered')
       expect(init.headers.Authorization).toBe('Bearer admin-jwt')
-      expect(init.method).toBe('POST')
+      expect(init.method ?? 'GET').toBe('GET')
     })
   })
 })

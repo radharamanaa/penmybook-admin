@@ -8,10 +8,9 @@ public record RefundRequestResolveResult(
         boolean success,
         String status,
         Long approvedAmountCents,
-        long refundedCents,
-        long residualCents
+        long refundedCents
 ) {
     public static RefundRequestResolveResult failed() {
-        return new RefundRequestResolveResult(false, null, null, 0L, 0L);
+        return new RefundRequestResolveResult(false, null, null, 0L);
     }
 }

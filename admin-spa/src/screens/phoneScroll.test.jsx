@@ -9,7 +9,7 @@ import { stubPhoneLayout } from '../test/phoneLayout.js'
 vi.mock('../api.js', () => ({
   api: {
     searchUsers: vi.fn(), otpStart: vi.fn(), otpVerify: vi.fn(), walletTopUp: vi.fn(),
-    refundRequestQueue: vi.fn(), refundResiduals: vi.fn(),
+    refundRequestQueue: vi.fn(), unrecoveredPayments: vi.fn(),
   },
 }))
 
@@ -69,7 +69,7 @@ describe('phone scroll targets', () => {
   it('shows the Refund requests banner', async () => {
     const { api } = await import('../api.js')
     api.refundRequestQueue.mockRejectedValue(new Error('billing down'))
-    api.refundResiduals.mockResolvedValue({ residuals: [], degraded: false })
+    api.unrecoveredPayments.mockResolvedValue({ payments: [], degraded: false })
     render(<MemoryRouter><RefundRequests /></MemoryRouter>)
     const banner = (await screen.findByText(/billing down/)).parentElement
     expect(scrolledTo(banner).length).toBeGreaterThan(0)

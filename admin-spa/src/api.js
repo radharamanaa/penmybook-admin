@@ -171,12 +171,7 @@ export const api = {
       headers: { 'X-Step-Up-Token': stepUpToken },
       timeoutMs: 35_000,
     }),
-  refundResiduals: () => request('/api/v1/admin/refund-residuals'),
-  settleRefundResidual: (id, stepUpToken) =>
-    request(`/api/v1/admin/refund-residuals/${id}/settle`, {
-      method: 'POST',
-      headers: { 'X-Step-Up-Token': stepUpToken },
-    }),
+  unrecoveredPayments: () => request('/api/v1/admin/payments/unrecovered'),
   // ── pricing (admin-api → entitlements) ──
   getPricing: () => request('/api/v1/admin/pricing'),
   upsertGlobalPricing: (action, valueCents, category = null) =>

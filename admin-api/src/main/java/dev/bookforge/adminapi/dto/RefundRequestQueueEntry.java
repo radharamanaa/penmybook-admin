@@ -24,7 +24,6 @@ public record RefundRequestQueueEntry(
         long liveRefundableCents,
         Long approvedAmountCents,
         Long refundedCents,
-        Long residualCents,
         String resolutionNote,
         Instant createdAt,
         Instant updatedAt,

@@ -32,6 +32,9 @@ public class AdminWireMock {
     /** Marker reason that triggers the WireMock audit-failure stub. */
     public static final String AUDIT_FAULT_REASON = "__fault_audit__";
 
+    /** The payment id the canonical unrecovered-payments stub reports. */
+    public static final String UNRECOVERED_PAYMENT_ID = "6f1c2a9e-3b7d-4e21-9a55-0c8d4f2b7e10";
+
     private static WireMockServer server;
 
     /** Exposed so that test steps can call {@code .verify()/.stubFor()/.resetAll()} on the same instance. */
@@ -70,7 +73,7 @@ public class AdminWireMock {
         // Phase 3b — admin-portal HTTP surface ↓
         stubBillingWalletCredit();
         stubBillingPaymentsHealth();
-        stubBillingRefundResiduals();
+        stubBillingUnrecoveredPayments();
         stubEntitlementsSetPlatformAdmin();
         stubEntitlementsUserSearch();
         stubEntitlementsUsersByIds();
@@ -168,21 +171,17 @@ public class AdminWireMock {
                         .withBody("{\"balanceCents\":1500}")));
     }
 
-    /**
-     * billing residual queue. Empty array is a clear queue, not degraded. Settle HTTP 200 is
-     * success even when billing would report {@code settled=false} (already-resolved replay).
-     */
-    private static void stubBillingRefundResiduals() {
-        server.stubFor(get(urlPathEqualTo("/internal/refund-residuals"))
+    /** billing {@code GET /internal/admin/payments/unrecovered} — one payment a dispute could not claw back. */
+    private static void stubBillingUnrecoveredPayments() {
+        server.stubFor(get(urlPathEqualTo("/internal/admin/payments/unrecovered"))
                 .willReturn(aResponse()
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")
-                        .withBody("[]")));
-        server.stubFor(post(urlPathEqualTo("/internal/refund-residuals/settle"))
-                .willReturn(aResponse()
-                        .withStatus(200)
-                        .withHeader("Content-Type", "application/json")
-                        .withBody("{\"settled\":true,\"residualId\":\"" + UUID.randomUUID() + "\"}")));
+                        .withBody("[{\"paymentId\":\"" + UNRECOVERED_PAYMENT_ID + "\","
+                                + "\"ownerType\":\"USER\",\"ownerId\":\"" + UUID.randomUUID() + "\","
+                                + "\"providerPaymentRef\":\"pi_unrecovered\",\"status\":\"CHARGED_BACK\","
+                                + "\"grossAmountCents\":2500,\"unrecoveredCents\":300,"
+                                + "\"updatedAt\":\"2026-10-20T12:00:00Z\"}]")));
     }
 
     /** billing {@code GET /internal/admin/payments/health} — payment-integration health relay. */

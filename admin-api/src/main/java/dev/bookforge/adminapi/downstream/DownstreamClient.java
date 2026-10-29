@@ -2,8 +2,6 @@ package dev.bookforge.adminapi.downstream;
 
 import dev.bookforge.adminapi.dto.RefundRequestQueueEntry;
 import dev.bookforge.adminapi.dto.RefundRequestQueueView;
-import dev.bookforge.adminapi.dto.RefundResidualEntry;
-import dev.bookforge.adminapi.dto.RefundResidualQueueView;
 import dev.bookforge.adminapi.dto.AccountStatusView;
 import dev.bookforge.adminapi.dto.AdminCommand;
 import dev.bookforge.adminapi.dto.GlobalWalletSummaryView;
@@ -13,6 +11,7 @@ import dev.bookforge.adminapi.dto.OrgView;
 import dev.bookforge.adminapi.dto.PaymentHealthView;
 import dev.bookforge.adminapi.dto.PlatformAdminUpdateView;
 import dev.bookforge.adminapi.dto.SpendByBooksResponse;
+import dev.bookforge.adminapi.dto.UnrecoveredPaymentsView;
 import dev.bookforge.adminapi.dto.SpendReportView;
 import dev.bookforge.adminapi.dto.UserSearchResultEntry;
 import dev.bookforge.adminapi.dto.PreAdmitEntryView;
@@ -228,16 +227,11 @@ public interface DownstreamClient {
     RefundRequestResolveResult resolveRefundRequest(AdminCommand command);
 
     /**
-     * billing {@code GET /internal/refund-residuals} — unresolved residual rows, oldest first.
-     * Envelope, never a bare list: billing dark must not look like a clear queue.
+     * billing {@code GET /internal/admin/payments/unrecovered} — payments a refund or dispute
+     * could not fully take back, newest update first. Envelope, never a bare list: billing dark
+     * must not look like nothing is unrecovered.
      */
-    RefundResidualQueueView listRefundResiduals();
-
-    /**
-     * billing {@code POST /internal/refund-residuals/settle} — wallet-credit one residual.
-     * Step-up gated via {@code AdminService.settleRefundResidual}. Params hash is {residualId}.
-     */
-    RefundResidualSettleResult settleRefundResidual(AdminCommand command);
+    UnrecoveredPaymentsView listUnrecoveredPayments(int limit);
 
     /** billing {@code GET /internal/admin/wallet/summary/global} — platform-wide money picture. */
     GlobalWalletSummaryView walletSummaryGlobal();

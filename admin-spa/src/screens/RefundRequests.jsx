@@ -21,6 +21,9 @@ const STATUS_BADGE = {
   WITHDRAWN: 'neutral',
 }
 
+// admin-api asks billing for at most this many rows (AdminController, unrecovered payments).
+const UNRECOVERED_LIST_LIMIT = 200
+
 function fmtCents(cents) {
   if (cents == null) return '—'
   return `$${(cents / 100).toFixed(2)}`
@@ -90,7 +93,7 @@ function ageOf(iso) {
 }
 
 /**
- * Staff refund-request queue plus unresolved residuals. Owner names come from
+ * Staff refund-request queue plus payments with money not recovered. Owner names come from
  * entitlements/org identity lookups; `identityDegraded` is the quiet banner when
  * those lookups fail.
  *
@@ -102,10 +105,10 @@ function ageOf(iso) {
 export default function RefundRequests() {
   const [status, setStatus] = useState('PENDING')
   const [envelope, setEnvelope] = useState(null)
-  const [residualEnvelope, setResidualEnvelope] = useState(null)
+  const [unrecoveredEnvelope, setUnrecoveredEnvelope] = useState(null)
   const [error, setError] = useState(null)
   const [ok, setOk] = useState(null)
-  const [otp, setOtp] = useState(null) // { kind, action, challengeId, params, request? }
+  const [otp, setOtp] = useState(null) // { request, action, challengeId, params }
   const [code, setCode] = useState('')
   const [note, setNote] = useState('')
   const [amountDraft, setAmountDraft] = useState('')
@@ -118,16 +121,16 @@ export default function RefundRequests() {
   const load = useCallback(async () => {
     setError(null)
     try {
-      const [req, residuals] = await Promise.all([
+      const [req, unrecovered] = await Promise.all([
         api.refundRequestQueue(status, 50),
-        api.refundResiduals(),
+        api.unrecoveredPayments(),
       ])
       setEnvelope(req)
-      setResidualEnvelope(residuals)
+      setUnrecoveredEnvelope(unrecovered)
     } catch (err) {
       setError(err.message)
       setEnvelope(null)
-      setResidualEnvelope(null)
+      setUnrecoveredEnvelope(null)
     }
   }, [status])
 
@@ -151,7 +154,7 @@ export default function RefundRequests() {
     try {
       // targetUserId MUST be null — copying Users.jsx's user.userId 403s every action.
       const resp = await api.otpStart('resolve_refund_request', null, params)
-      setOtp({ kind: 'resolve', request, action: 'resolve_refund_request', challengeId: resp.challengeId, params })
+      setOtp({ request, action: 'resolve_refund_request', challengeId: resp.challengeId, params })
       setCode('')
       setNote('')
     } catch (err) {
@@ -159,22 +162,9 @@ export default function RefundRequests() {
     }
   }
 
-  async function startSettleOtp(residual) {
-    const params = { residualId: residual.id }
-    setError(null)
-    setOk(null)
-    try {
-      const resp = await api.otpStart('settle_refund_residual', null, params)
-      setOtp({ kind: 'settle', action: 'settle_refund_residual', challengeId: resp.challengeId, params })
-      setCode('')
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
   async function verifyAndExecute() {
     if (!otp) return
-    if (otp.kind === 'resolve' && !note.trim()) return
+    if (!note.trim()) return
     setError(null)
     setOk(null)
     try {
@@ -185,24 +175,19 @@ export default function RefundRequests() {
         setError(`Code rejected: ${v.failureReason ?? 'invalid'}`)
         return
       }
-      if (otp.kind === 'settle') {
-        await api.settleRefundResidual(otp.params.residualId, v.stepUpToken)
-        setOk('Residual settled. Refresh if an APPROVED request should now be closed.')
-      } else {
-        // Hashed fields come from otp.params (the server's hash recompute), not the form.
-        // Note is editable after OTP start because it is not in the hash.
-        await api.resolveRefundRequest(
-          otp.params.requestId,
-          otp.params.decision,
-          otp.params.amountCents,
-          note.trim(),
-          v.stepUpToken,
-        )
-        setOk(otp.params.decision === 'APPROVE'
-          ? 'Approved — refresh if the row has left the default PENDING filter.'
-          : 'Rejected.')
-        setAmountDraft('')
-      }
+      // Hashed fields come from otp.params (the server's hash recompute), not the form.
+      // Note is editable after OTP start because it is not in the hash.
+      await api.resolveRefundRequest(
+        otp.params.requestId,
+        otp.params.decision,
+        otp.params.amountCents,
+        note.trim(),
+        v.stepUpToken,
+      )
+      setOk(otp.params.decision === 'APPROVE'
+        ? 'Approved — refresh if the row has left the default PENDING filter.'
+        : 'Rejected.')
+      setAmountDraft('')
       setOtp(null)
       await load()
     } catch (err) {
@@ -219,9 +204,9 @@ export default function RefundRequests() {
   const requests = envelope?.requests ?? []
   const degraded = envelope?.degraded === true
   const identityDegraded = envelope?.identityDegraded === true
-  const residuals = residualEnvelope?.residuals ?? []
-  const residualsDegraded = residualEnvelope?.degraded === true
-  const executeDisabled = code.length < 6 || (otp?.kind === 'resolve' && !note.trim())
+  const unrecovered = unrecoveredEnvelope?.payments ?? []
+  const unrecoveredDegraded = unrecoveredEnvelope?.degraded === true
+  const executeDisabled = code.length < 6 || !note.trim()
 
   return (
     <>
@@ -230,7 +215,7 @@ export default function RefundRequests() {
         Users ask; you decide the amount against the live refundable figure (snapshot is
         what we quoted). Leftover promo inside remaining can ride the Stripe refund.
         Identity names load when entitlements answers; a quiet banner shows if they do
-        not. Residuals below are money that could not go back to a card.
+        not. Money not recovered is listed below the queue.
       </p>
       <div ref={resultRef}>
         {error && <div className="msg error">{error}</div>}
@@ -263,6 +248,8 @@ export default function RefundRequests() {
 
       {envelope == null && !error ? (
         <p className="sub">Loading…</p>
+      ) : envelope == null ? (
+        <p className="sub">Could not load the queue — this is not an empty queue.</p>
       ) : !degraded && requests.length === 0 ? (
         <p className="sub">Queue is clear — nobody is waiting under {status.replaceAll('_', ' ')}.</p>
       ) : requests.length > 0 ? (
@@ -277,7 +264,6 @@ export default function RefundRequests() {
                 <th role="columnheader">Live refundable</th>
                 <th role="columnheader">Approved</th>
                 <th role="columnheader">Refunded</th>
-                <th role="columnheader">Residual</th>
                 <th role="columnheader">Reason</th>
                 <th role="columnheader">Age</th>
                 <th role="columnheader" />
@@ -305,7 +291,6 @@ export default function RefundRequests() {
                   <td role="cell" data-label="Live refundable">{fmtCents(row.liveRefundableCents)}</td>
                   <td role="cell" data-label="Approved">{fmtCents(row.approvedAmountCents)}</td>
                   <td role="cell" data-label="Refunded">{fmtCents(row.refundedCents)}</td>
-                  <td role="cell" data-label="Residual">{fmtCents(row.residualCents)}</td>
                   <td role="cell" data-label="Reason" style={{ maxWidth: 240, whiteSpace: 'pre-wrap' }}>{row.reason || '—'}</td>
                   <td role="cell" data-label="Age" className="mono">{ageOf(row.createdAt)}</td>
                   <td role="cell">
@@ -328,59 +313,53 @@ export default function RefundRequests() {
         </div>
       ) : null}
 
-      <h2 style={{ marginTop: 28 }}>Unresolved residuals</h2>
+      <h2 style={{ marginTop: 28 }}>Money not recovered</h2>
       <p className="sub">
-        Money that never made it back to a card. Settling a refund-request residual closes the
-        request without adding wallet credit — the cash never left. Account-deletion residuals
-        credit the wallet.
+        Refunds or disputes that could not take the money back from the wallet because it was
+        already spent. A payment stays listed while that money is outstanding.
       </p>
-      {residualsDegraded && (
-        <div className="msg error">
-          Billing did not answer the residual queue. This is not an empty list.
-        </div>
+      {unrecoveredDegraded && (
+        <div className="msg error">Billing did not answer — this is not an empty list.</div>
       )}
-      {residualEnvelope == null && !error ? (
-        <p className="sub">Loading residuals…</p>
-      ) : !residualsDegraded && residuals.length === 0 ? (
-        <p className="sub">No unresolved residuals.</p>
-      ) : residuals.length > 0 ? (
+      {unrecoveredEnvelope == null && !error ? (
+        <p className="sub">Loading…</p>
+      ) : unrecoveredEnvelope == null ? (
+        <p className="sub">Could not load this list — this is not an empty list.</p>
+      ) : !unrecoveredDegraded && unrecovered.length === 0 ? (
+        <p className="sub">Nothing unrecovered.</p>
+      ) : unrecovered.length > 0 ? (
         <div className="table-wrap">
           <table className="cards" role="table">
             <thead role="rowgroup">
               <tr role="row">
                 <th role="columnheader">Owner</th>
-                <th role="columnheader">Amount</th>
-                <th role="columnheader">Payment</th>
                 <th role="columnheader">Stripe payment</th>
-                <th role="columnheader">Reason</th>
-                <th role="columnheader">Age</th>
-                <th role="columnheader" />
+                <th role="columnheader">Status</th>
+                <th role="columnheader">Unrecovered</th>
+                <th role="columnheader">Last change</th>
               </tr>
             </thead>
             <tbody role="rowgroup">
-              {residuals.map((row) => (
-                <tr role="row" key={row.id}>
+              {unrecovered.map((row) => (
+                <tr role="row" key={row.paymentId}>
                   <td role="cell" data-label="Owner">
                     <div className="mono" style={{ fontSize: 11 }}>{row.ownerType}/{row.ownerId}</div>
                   </td>
-                  <td role="cell" data-label="Amount">{fmtCents(row.amountCents)}</td>
-                  <td role="cell" data-label="Payment" className="mono" style={{ fontSize: 11 }}>{row.paymentId || '—'}</td>
                   <td role="cell" data-label="Stripe payment" className="mono" style={{ fontSize: 11 }}>{row.providerPaymentRef || '—'}</td>
-                  <td role="cell" data-label="Reason" style={{ maxWidth: 280, whiteSpace: 'pre-wrap' }}>{row.reason || '—'}</td>
-                  <td role="cell" data-label="Age" className="mono">{ageOf(row.createdAt)}</td>
-                  <td role="cell">
-                    <button type="button" className="small" onClick={() => startSettleOtp(row)}>
-                      Settle
-                    </button>
-                  </td>
+                  <td role="cell" data-label="Status">{row.status}</td>
+                  <td role="cell" data-label="Unrecovered">{fmtCents(row.unrecoveredCents)}</td>
+                  <td role="cell" data-label="Last change" className="mono">{ageOf(row.updatedAt)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {unrecovered.length >= UNRECOVERED_LIST_LIMIT && (
+            <p className="sub">Showing the {UNRECOVERED_LIST_LIMIT} most recent — there may be more.</p>
+          )}
         </div>
       ) : null}
 
-      {otp && otp.kind === 'resolve' && (
+      {otp && (
         <div ref={confirmRef} className="panel" style={{ marginTop: 16 }}>
           <h2 style={{ marginTop: 0 }}>
             Confirm {otp.params.decision.toLowerCase()} for <code>{otp.params.requestId}</code>
@@ -422,31 +401,6 @@ export default function RefundRequests() {
               onClick={verifyAndExecute}
             >
               Verify &amp; execute
-            </button>
-            <button type="button" className="ghost" onClick={() => setOtp(null)}>Cancel</button>
-          </div>
-        </div>
-      )}
-
-      {otp && otp.kind === 'settle' && (
-        <div ref={confirmRef} className="panel" style={{ marginTop: 16 }}>
-          <h2 style={{ marginTop: 0 }}>
-            Confirm settle for <code>{otp.params.residualId}</code>
-          </h2>
-          <p className="sub">
-            Settles this residual. Refund-request rows close the request without a wallet credit
-            (the Stripe refusal never took the cash). The residual id is bound into the OTP.
-          </p>
-          <div className="row">
-            <div>
-              <label>OTP code (check email / dev DB)</label>
-              <input value={code} inputMode="numeric" autoComplete="one-time-code"
-                     onChange={(e) => setCode(e.target.value)} maxLength={6} />
-            </div>
-          </div>
-          <div className="row">
-            <button type="button" disabled={executeDisabled} onClick={verifyAndExecute}>
-              Verify &amp; settle
             </button>
             <button type="button" className="ghost" onClick={() => setOtp(null)}>Cancel</button>
           </div>

@@ -14,12 +14,12 @@ import dev.bookforge.adminapi.dto.PlatformAdminUpdateView;
 import dev.bookforge.adminapi.dto.RefundRequestPaymentEntry;
 import dev.bookforge.adminapi.dto.RefundRequestQueueEntry;
 import dev.bookforge.adminapi.dto.RefundRequestQueueView;
-import dev.bookforge.adminapi.dto.RefundResidualEntry;
-import dev.bookforge.adminapi.dto.RefundResidualQueueView;
 import dev.bookforge.adminapi.dto.SpendActionEntry;
 import dev.bookforge.adminapi.dto.SpendByBookChargeView;
 import dev.bookforge.adminapi.dto.SpendByBooksResponse;
 import dev.bookforge.adminapi.dto.SpendReportView;
+import dev.bookforge.adminapi.dto.UnrecoveredPaymentEntry;
+import dev.bookforge.adminapi.dto.UnrecoveredPaymentsView;
 import dev.bookforge.adminapi.dto.UserSearchResultEntry;
 import dev.bookforge.adminapi.dto.PreAdmitEntryView;
 import dev.bookforge.adminapi.dto.PreAdmitView;
@@ -258,7 +258,6 @@ public class HttpDownstreamClient implements DownstreamClient {
                         n.hasNonNull("approvedAmountCents")
                                 ? n.path("approvedAmountCents").asLong() : null,
                         n.hasNonNull("refundedCents") ? n.path("refundedCents").asLong() : null,
-                        n.hasNonNull("residualCents") ? n.path("residualCents").asLong() : null,
                         n.path("resolutionNote").asText(null),
                         parseInstant(n.path("createdAt").asText(null)),
                         parseInstant(n.path("updatedAt").asText(null)),
@@ -393,7 +392,7 @@ public class HttpDownstreamClient implements DownstreamClient {
                     row.id(), row.ownerType(), row.ownerId(), row.status(),
                     row.requestedAmountCents(), row.reason(),
                     row.snapshotRefundableCents(), row.liveRefundableCents(),
-                    row.approvedAmountCents(), row.refundedCents(), row.residualCents(),
+                    row.approvedAmountCents(), row.refundedCents(),
                     row.resolutionNote(), row.createdAt(), row.updatedAt(),
                     ownerName, ownerEmail, row.payments(), row.suggestedPaymentId()));
         }
@@ -440,8 +439,7 @@ public class HttpDownstreamClient implements DownstreamClient {
                     json.path("status").asText(null),
                     json.hasNonNull("approvedAmountCents")
                             ? json.path("approvedAmountCents").asLong() : null,
-                    json.path("refundedCents").asLong(0L),
-                    json.path("residualCents").asLong(0L));
+                    json.path("refundedCents").asLong(0L));
         } catch (DownstreamCallException e) {
             return RefundRequestResolveResult.failed();
         }
@@ -453,72 +451,37 @@ public class HttpDownstreamClient implements DownstreamClient {
     }
 
     @Override
-    @CircuitBreaker(name = CB_BILLING_REPORTS, fallbackMethod = "listRefundResidualsFallback")
-    public RefundResidualQueueView listRefundResiduals() {
-        String url = downstream.billingUrl() + "/internal/refund-residuals";
+    @CircuitBreaker(name = CB_BILLING_REPORTS, fallbackMethod = "listUnrecoveredPaymentsFallback")
+    public UnrecoveredPaymentsView listUnrecoveredPayments(int limit) {
+        String url = downstream.billingUrl() + "/internal/admin/payments/unrecovered?limit=" + limit;
         try {
             JsonNode json = get(url, BILLING_AUD, ADMIN_RPC_TIMEOUT);
             if (json == null || !json.isArray()) {
-                log.warn("refund-residual queue: expected a JSON array");
-                return new RefundResidualQueueView(true, List.of());
+                log.warn("unrecovered-payments list: expected a JSON array");
+                return new UnrecoveredPaymentsView(true, List.of());
             }
-            List<RefundResidualEntry> rows = new ArrayList<>();
+            List<UnrecoveredPaymentEntry> rows = new ArrayList<>();
             for (JsonNode n : json) {
-                rows.add(new RefundResidualEntry(
-                        UUID.fromString(n.path("id").asText()),
+                rows.add(new UnrecoveredPaymentEntry(
+                        UUID.fromString(n.path("paymentId").asText()),
                         n.path("ownerType").asText(),
                         UUID.fromString(n.path("ownerId").asText()),
-                        n.hasNonNull("paymentId") ? UUID.fromString(n.path("paymentId").asText()) : null,
-                        providerPaymentRef(n),
-                        n.path("amountCents").asLong(0L),
-                        n.path("reason").asText(""),
-                        parseInstant(n.path("createdAt").asText(null))));
+                        n.path("providerPaymentRef").asText(null),
+                        n.path("status").asText(),
+                        n.path("grossAmountCents").asLong(0L),
+                        n.path("unrecoveredCents").asLong(0L),
+                        parseInstant(n.path("updatedAt").asText(null))));
             }
-            return new RefundResidualQueueView(false, rows);
+            return new UnrecoveredPaymentsView(false, rows);
         } catch (DownstreamCallException e) {
-            log.warn("refund-residual queue unavailable: {}", e.getMessage());
-            return new RefundResidualQueueView(true, List.of());
+            log.warn("unrecovered-payments list unavailable: {}", e.getMessage());
+            return new UnrecoveredPaymentsView(true, List.of());
         }
     }
 
-    /** Billing sends {@code providerPaymentRef}. Older payloads used {@code paddleTransactionId}. */
-    static String providerPaymentRef(JsonNode n) {
-        JsonNode current = n.get("providerPaymentRef");
-        if (current != null && current.isTextual() && !current.asText().isBlank()) {
-            return current.asText();
-        }
-        JsonNode legacy = n.get("paddleTransactionId");
-        if (legacy != null && legacy.isTextual() && !legacy.asText().isBlank()) {
-            return legacy.asText();
-        }
-        return null;
-    }
-
-    public RefundResidualQueueView listRefundResidualsFallback(Throwable t) {
-        log.warn("refund-residual queue short-circuited: {}", t.toString());
-        return new RefundResidualQueueView(true, List.of());
-    }
-
-    @Override
-    @CircuitBreaker(name = CB_BILLING, fallbackMethod = "settleRefundResidualFallback")
-    public RefundResidualSettleResult settleRefundResidual(AdminCommand command) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("residualId", command.params().get("residualId"));
-        body.put("staffUserId", command.staffUserId().toString());
-        // Full token: settling a residual mints wallet credit, so billing gates it exactly like a refund.
-        body.put("stepUpToken", command.stepUpToken());
-        String url = downstream.billingUrl() + "/internal/refund-residuals/settle";
-        try {
-            send(url, BILLING_AUD, toJson(body), ADMIN_RPC_TIMEOUT);
-            return new RefundResidualSettleResult(true);
-        } catch (DownstreamCallException e) {
-            return RefundResidualSettleResult.failed();
-        }
-    }
-
-    public RefundResidualSettleResult settleRefundResidualFallback(AdminCommand command, Throwable t) {
-        log.warn("settleRefundResidual short-circuited: {}", t.toString());
-        return RefundResidualSettleResult.failed();
+    public UnrecoveredPaymentsView listUnrecoveredPaymentsFallback(int limit, Throwable t) {
+        log.warn("unrecovered-payments list short-circuited: {}", t.toString());
+        return new UnrecoveredPaymentsView(true, List.of());
     }
 
     @Override

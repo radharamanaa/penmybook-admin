@@ -8,7 +8,6 @@ import dev.bookforge.adminapi.downstream.DownstreamResult;
 import dev.bookforge.adminapi.downstream.ForceResolveReversedCallResult;
 import dev.bookforge.adminapi.downstream.HttpDownstreamClient;
 import dev.bookforge.adminapi.downstream.RefundRequestResolveResult;
-import dev.bookforge.adminapi.downstream.RefundResidualSettleResult;
 import dev.bookforge.adminapi.downstream.ServiceAccountTokenFactory;
 import dev.bookforge.adminapi.downstream.WalletUnfreezeCallResult;
 import dev.bookforge.adminapi.dto.AccountStateView;
@@ -62,7 +61,6 @@ public class AdminService {
     private static final String FLAG_DEVELOPER = "flag_developer";
     private static final String REFUND = "refund";
     private static final String RESOLVE_REFUND_REQUEST = "resolve_refund_request";
-    private static final String SETTLE_REFUND_RESIDUAL = "settle_refund_residual";
     private static final String WALLET_TOP_UP = "wallet_top_up";
     private static final String WALLET_UNFREEZE = "wallet_unfreeze";
 
@@ -259,7 +257,7 @@ public class AdminService {
      * attribution as an approval.
      *
      * <p>Hand-rolled beside {@link #refund} rather than through {@link #runWrite}: billing's
-     * outcome (status, refunded, residual) must reach the audit row and the SPA, and
+     * outcome (status, refunded) must reach the audit row and the SPA, and
      * {@link AdminActionResult} is shared by four other writes that do not carry those fields.
      */
     public ResolveRefundOutcome resolveRefundRequest(AdminCommand command) {
@@ -279,36 +277,7 @@ public class AdminService {
             return ResolveRefundOutcome.downstreamRejected();
         }
         return ResolveRefundOutcome.success(result.status(), result.approvedAmountCents(),
-                result.refundedCents(), result.residualCents());
-    }
-
-    public SettleResidualOutcome settleRefundResidual(AdminCommand command) {
-        StepUpVerifier.Result gate = gate(SETTLE_REFUND_RESIDUAL, command);
-        if (gate instanceof StepUpVerifier.Result.Missing) {
-            return SettleResidualOutcome.rejected(REJECT_STEP_UP_REQUIRED);
-        }
-        if (!(gate instanceof StepUpVerifier.Result.Valid)) {
-            return SettleResidualOutcome.rejected(REJECT_STEP_UP_INVALID);
-        }
-        RefundResidualSettleResult result = callDownstream(
-                () -> downstream.settleRefundResidual(command),
-                RefundResidualSettleResult::failed);
-        if (!result.success()) {
-            return SettleResidualOutcome.downstreamRejected();
-        }
-        return SettleResidualOutcome.ok();
-    }
-
-    public record SettleResidualOutcome(boolean success, String rejectionReason) {
-        static SettleResidualOutcome ok() {
-            return new SettleResidualOutcome(true, null);
-        }
-        static SettleResidualOutcome rejected(String reason) {
-            return new SettleResidualOutcome(false, reason);
-        }
-        static SettleResidualOutcome downstreamRejected() {
-            return new SettleResidualOutcome(false, null);
-        }
+                result.refundedCents());
     }
 
     /**
@@ -321,21 +290,19 @@ public class AdminService {
             String status,
             Long approvedAmountCents,
             long refundedCents,
-            long residualCents,
             String rejectionReason) {
 
         static ResolveRefundOutcome success(String status, Long approvedAmountCents,
-                                            long refundedCents, long residualCents) {
-            return new ResolveRefundOutcome(true, status, approvedAmountCents, refundedCents,
-                    residualCents, null);
+                                            long refundedCents) {
+            return new ResolveRefundOutcome(true, status, approvedAmountCents, refundedCents, null);
         }
 
         static ResolveRefundOutcome rejected(String reason) {
-            return new ResolveRefundOutcome(false, null, null, 0L, 0L, reason);
+            return new ResolveRefundOutcome(false, null, null, 0L, reason);
         }
 
         static ResolveRefundOutcome downstreamRejected() {
-            return new ResolveRefundOutcome(false, null, null, 0L, 0L, null);
+            return new ResolveRefundOutcome(false, null, null, 0L, null);
         }
     }
 

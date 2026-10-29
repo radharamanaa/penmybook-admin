@@ -4,11 +4,11 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 
 const refundRequestQueue = vi.hoisted(() => vi.fn())
-const refundResiduals = vi.hoisted(() => vi.fn())
+const unrecoveredPayments = vi.hoisted(() => vi.fn())
 vi.mock('../api.js', () => ({
   api: {
     refundRequestQueue: (...a) => refundRequestQueue(...a),
-    refundResiduals: (...a) => refundResiduals(...a),
+    unrecoveredPayments: (...a) => unrecoveredPayments(...a),
   },
 }))
 
@@ -25,7 +25,7 @@ function renderQueue() {
 describe('RefundRequests honest promo copy (S5)', () => {
   beforeEach(() => {
     refundRequestQueue.mockResolvedValue({ requests: [], degraded: false })
-    refundResiduals.mockResolvedValue({ residuals: [], degraded: false })
+    unrecoveredPayments.mockResolvedValue({ payments: [], degraded: false })
   })
 
   it('keeps snapshot vs live visible and does not claim promo never rides the card', async () => {
@@ -39,7 +39,6 @@ describe('RefundRequests honest promo copy (S5)', () => {
         snapshotRefundableCents: 10000,
         liveRefundableCents: 8000,
         refundedCents: 0,
-        residualCents: 0,
         reason: 'please',
         createdAt: new Date().toISOString(),
       }],
@@ -57,7 +56,7 @@ describe('RefundRequests honest promo copy (S5)', () => {
 describe('RefundRequests queue filters (S7)', () => {
   beforeEach(() => {
     refundRequestQueue.mockResolvedValue({ requests: [], degraded: false })
-    refundResiduals.mockResolvedValue({ residuals: [], degraded: false })
+    unrecoveredPayments.mockResolvedValue({ payments: [], degraded: false })
   })
 
   it('exposes PAYING and SETTLED with the staff labels', async () => {
@@ -91,7 +90,6 @@ describe('RefundRequests queue filters (S7)', () => {
         snapshotRefundableCents: 2000,
         liveRefundableCents: 2000,
         refundedCents: 0,
-        residualCents: 0,
         reason: 'please',
         createdAt: new Date().toISOString(),
       }],
@@ -115,7 +113,7 @@ describe('RefundRequests approved rows (U1, U4, P1, G2)', () => {
   const PAY_OLD = 'cccccccc-0000-0000-0000-00000000000c'
 
   beforeEach(() => {
-    refundResiduals.mockResolvedValue({ residuals: [], degraded: false })
+    unrecoveredPayments.mockResolvedValue({ payments: [], degraded: false })
   })
 
   it('shows "All refundable" for an everything request and the approved amount', async () => {
@@ -184,5 +182,77 @@ describe('RefundRequests approved rows (U1, U4, P1, G2)', () => {
     refundRequestQueue.mockResolvedValue({ requests: [], degraded: false })
     renderQueue()
     expect(await screen.findByText(/leave blank for the amount the user asked/i)).toBeInTheDocument()
+  })
+})
+
+// Billing dropped refund residuals (28 Aug 2026); the panel that listed them always showed
+// "Billing did not answer". It now lists payments a refund or dispute could not claw back.
+describe('RefundRequests money not recovered', () => {
+  beforeEach(() => {
+    refundRequestQueue.mockResolvedValue({ requests: [], degraded: false })
+  })
+
+  it('lists each payment with unrecovered money', async () => {
+    unrecoveredPayments.mockResolvedValue({
+      degraded: false,
+      payments: [{
+        paymentId: 'pay-1', ownerType: 'USER', ownerId: 'u1', providerPaymentRef: 'pi_1',
+        status: 'CHARGED_BACK', grossAmountCents: 2500, unrecoveredCents: 300,
+        updatedAt: new Date().toISOString(),
+      }],
+    })
+    renderQueue()
+    expect(await screen.findByRole('heading', { name: 'Money not recovered' })).toBeInTheDocument()
+    expect(screen.getByText(/stays listed while that money is outstanding/i)).toBeInTheDocument()
+    expect(await screen.findByText('pi_1')).toBeInTheDocument()
+    expect(screen.getByText('USER/u1')).toBeInTheDocument()
+    expect(screen.getByText('CHARGED_BACK')).toBeInTheDocument()
+    const unrecovered = screen.getAllByRole('cell').find((c) => c.getAttribute('data-label') === 'Unrecovered')
+    expect(unrecovered).toHaveTextContent('$3.00')
+    expect(screen.queryByText(/not an empty list/i)).not.toBeInTheDocument()
+  })
+
+  it('says nothing is unrecovered when billing answers with no rows', async () => {
+    unrecoveredPayments.mockResolvedValue({ degraded: false, payments: [] })
+    renderQueue()
+    expect(await screen.findByText('Nothing unrecovered.')).toBeInTheDocument()
+    expect(screen.queryByText(/not an empty list/i)).not.toBeInTheDocument()
+  })
+
+  it('shows a red banner, not an empty list, when billing did not answer', async () => {
+    unrecoveredPayments.mockResolvedValue({ degraded: true, payments: [] })
+    renderQueue()
+    const banner = await screen.findByText('Billing did not answer — this is not an empty list.')
+    expect(banner).toHaveClass('msg', 'error')
+    expect(screen.queryByText('Nothing unrecovered.')).not.toBeInTheDocument()
+  })
+
+  it('no longer shows a Residual column on the request table', async () => {
+    unrecoveredPayments.mockResolvedValue({ degraded: false, payments: [] })
+    refundRequestQueue.mockResolvedValue({
+      degraded: false,
+      requests: [{
+        id: 'r1', ownerType: 'USER', ownerId: 'u1', status: 'PENDING',
+        requestedAmountCents: 1000, snapshotRefundableCents: 1000, liveRefundableCents: 1000,
+        refundedCents: 0, reason: 'please', createdAt: new Date().toISOString(),
+      }],
+    })
+    renderQueue()
+    await screen.findByText('please')
+    expect(screen.queryByRole('columnheader', { name: /Residual/i })).not.toBeInTheDocument()
+  })
+})
+
+// R1 review: when admin-api itself fails, neither list may claim to be empty.
+describe('RefundRequests when the admin API fails', () => {
+  it('says the queue and the unrecovered list could not load, not that they are empty', async () => {
+    refundRequestQueue.mockRejectedValue(new Error('Bad gateway'))
+    unrecoveredPayments.mockRejectedValue(new Error('Bad gateway'))
+    renderQueue()
+    expect(await screen.findByText(/could not load the queue — this is not an empty queue/i))
+      .toBeInTheDocument()
+    expect(screen.getByText(/could not load this list — this is not an empty list/i)).toBeInTheDocument()
+    expect(screen.queryByText(/queue is clear/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/nothing unrecovered/i)).not.toBeInTheDocument()
   })
 })
