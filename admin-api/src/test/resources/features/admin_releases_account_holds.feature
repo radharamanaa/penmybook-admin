@@ -12,6 +12,13 @@ Feature: Staff can lift a chargeback or review hold
     Then the response status is 200
     And the account state shows "SUSPENDED_FOR_REVIEW", a frozen wallet for "dispute:du_test" and 126 cents unrecovered
 
+  Scenario: A billing outage still shows the account status so staff can reactivate
+    Given a platform admin is signed in
+    And the target user is suspended for review but billing is down
+    When they read the target user's account state
+    Then the response status is 200
+    And the account state shows "SUSPENDED_FOR_REVIEW" with the wallet marked unknown
+
   Scenario: A platform admin reactivates a suspended account
     Given a platform admin is signed in
     When they reactivate the target user with a valid step-up token

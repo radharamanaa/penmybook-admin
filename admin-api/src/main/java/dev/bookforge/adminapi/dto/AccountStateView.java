@@ -15,5 +15,7 @@ public record AccountStateView(
         long balanceCents,
         boolean walletFrozen,
         String walletFrozenReason,
-        long unrecoveredCents
+        long unrecoveredCents,
+        /** True when billing did not answer: the wallet fields are unknown, not "not frozen". */
+        boolean walletDegraded
 ) {}

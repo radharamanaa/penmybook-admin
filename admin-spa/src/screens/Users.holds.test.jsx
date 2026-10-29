@@ -129,6 +129,25 @@ describe('Users — lifting a chargeback or review hold (F3)', () => {
     expect(await screen.findByText(/unknown/i, { selector: '.hold-status' })).toBeInTheDocument()
   })
 
+  it('still offers reactivation when billing is down, and never says there is no hold', async () => {
+    accountState.mockResolvedValue({ ...HELD, walletFrozen: false, walletFrozenReason: null,
+      unrecoveredCents: 0, walletDegraded: true })
+    await manage()
+
+    expect(await screen.findByText(/wallet: unknown — billing did not answer/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /start otp reactivate account/i })).toBeInTheDocument()
+    expect(screen.queryByText(/no hold on this account/i)).not.toBeInTheDocument()
+  })
+
+  it('does not claim "no hold" for an active account when billing is down', async () => {
+    accountState.mockResolvedValue({ ...HELD, accountStatus: 'ACTIVE', suspensionKind: null,
+      walletFrozen: false, walletFrozenReason: null, unrecoveredCents: 0, walletDegraded: true })
+    await manage()
+
+    expect(await screen.findByText(/wallet: unknown — billing did not answer/i)).toBeInTheDocument()
+    expect(screen.queryByText(/no hold on this account/i)).not.toBeInTheDocument()
+  })
+
   it('offers no lift when nothing is held', async () => {
     accountState.mockResolvedValue({ ...HELD, accountStatus: 'ACTIVE', walletFrozen: false,
       walletFrozenReason: null, unrecoveredCents: 0 })

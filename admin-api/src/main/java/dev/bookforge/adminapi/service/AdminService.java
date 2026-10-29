@@ -3,6 +3,7 @@ package dev.bookforge.adminapi.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.bookforge.adminapi.config.DownstreamProperties;
 import dev.bookforge.adminapi.config.ServiceJwtProperties;
+import dev.bookforge.adminapi.downstream.DownstreamCallException;
 import dev.bookforge.adminapi.downstream.DownstreamClient;
 import dev.bookforge.adminapi.downstream.DownstreamResult;
 import dev.bookforge.adminapi.downstream.ForceResolveReversedCallResult;
@@ -192,13 +193,24 @@ public class AdminService {
                 wallet.frozen(), wallet.frozenReason(), wallet.unrecoveredCents());
     }
 
-    /** Account status (entitlements) plus the wallet's freeze and unrecovered money (billing). */
+    /**
+     * Account status (entitlements) plus the wallet's freeze and unrecovered money (billing). A
+     * billing outage only marks the wallet part unknown ({@code walletDegraded}): reactivating needs
+     * entitlements alone, so the account part must still reach staff.
+     */
     public AccountStateView accountState(UUID userId) {
         AccountStatusView status = downstream.accountStatus(userId);
-        WalletSummaryView wallet = downstream.walletSummary(USER_OWNER_TYPE, userId);
+        WalletSummaryView wallet;
+        try {
+            wallet = downstream.walletSummary(USER_OWNER_TYPE, userId);
+        } catch (DownstreamCallException | CallNotPermittedException billingDown) {
+            return new AccountStateView(userId, status.accountStatus(), status.suspensionKind(),
+                    false, 0L, false, null, 0L, true);
+        }
         return new AccountStateView(userId, status.accountStatus(), status.suspensionKind(),
                 wallet.walletExists(),
-                wallet.balanceCents(), wallet.frozen(), wallet.frozenReason(), wallet.unrecoveredCents());
+                wallet.balanceCents(), wallet.frozen(), wallet.frozenReason(), wallet.unrecoveredCents(),
+                false);
     }
 
     /**

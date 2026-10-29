@@ -170,6 +170,25 @@ public class PortalAdminSteps {
                                 + "\"unrecoveredCents\":" + unrecoveredCents + "}")));
     }
 
+    @Given("the target user is suspended for review but billing is down")
+    public void targetHeldBillingDown() {
+        AdminWireMock.server().stubFor(get(urlPathEqualTo("/internal/admin/users/" + TARGET_USER + "/status"))
+                .atPriority(1)
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"accountStatus\":\"SUSPENDED_FOR_REVIEW\",\"suspensionKind\":\"DISPUTE\"}")));
+        AdminWireMock.server().stubFor(get(urlPathEqualTo("/internal/admin/wallet/summary"))
+                .atPriority(1)
+                .willReturn(aResponse().withStatus(503)));
+    }
+
+    @Then("the account state shows {string} with the wallet marked unknown")
+    public void accountStateWalletUnknown(String status) {
+        JsonNode body = parseBody();
+        assertThat(body.path("accountStatus").asText()).isEqualTo(status);
+        assertThat(body.path("walletDegraded").asBoolean()).isTrue();
+        assertThat(body.path("walletFrozen").asBoolean()).isFalse();
+    }
+
     @Given("entitlements reports the target user is {string} and not suspended")
     public void entitlementsRefusesUnsuspend(String status) {
         AdminWireMock.server().stubFor(post(urlMatching("/internal/admin/unsuspend"))

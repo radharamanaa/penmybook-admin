@@ -169,8 +169,13 @@ function HoldPanel({ state, note, onNoteChange, onReactivate, onUnfreeze }) {
   if (!state) return null
   const suspended = SUSPENDED_STATUSES.has(state.accountStatus)
   const held = suspended || state.walletFrozen
-  if (!held) {
+  // Billing did not answer: the wallet part is unknown, so never say "no hold" (Sonnet review).
+  const walletUnknown = state.walletDegraded === true
+  if (!held && !walletUnknown) {
     return <p className="sub">No hold on this account.</p>
+  }
+  if (!held) {
+    return <p className="sub">Account is active. Wallet: unknown — billing did not answer.</p>
   }
   const noteReady = note.trim().length >= HOLD_NOTE_MIN_LENGTH
   return (
@@ -183,6 +188,7 @@ function HoldPanel({ state, note, onNoteChange, onReactivate, onUnfreeze }) {
           <> — <strong>{HOLD_KIND_LABELS[state.suspensionKind]}</strong></>
         )}
         {state.walletFrozen && <> · Wallet frozen (<code>{state.walletFrozenReason}</code>)</>}
+        {walletUnknown && <> · Wallet: unknown — billing did not answer</>}
       </p>
       {state.unrecoveredCents > 0 && (
         <p>
