@@ -99,6 +99,31 @@ describe('Users — lifting a chargeback or review hold (F3)', () => {
     expect(await screen.findByText(/a@b\.co is ACTIVE again/i)).toBeInTheDocument()
   })
 
+  it('says the account is still held when the reactivation leaves a content review standing', async () => {
+    accountState.mockResolvedValue({ ...HELD, accountStatus: 'SUSPENDED', suspensionKind: 'CONTENT',
+      walletFrozen: false })
+    unsuspend.mockResolvedValue({ userId: 'u1', accountStatus: 'SUSPENDED_FOR_REVIEW', heldForContentReview: true })
+    await manage()
+    await userEvent.type(await screen.findByLabelText(/why are you lifting the hold/i), 'staff hold over')
+    await userEvent.click(screen.getByRole('button', { name: /start otp reactivate account/i }))
+    await userEvent.type(screen.getByLabelText(/otp code/i), '123456')
+    await userEvent.click(screen.getByRole('button', { name: /verify & execute/i }))
+
+    expect(await screen.findByText(
+      'a@b.co is still held for a content review. Tick “Reset content strikes” and reactivate again to lift it.',
+    )).toBeInTheDocument()
+    expect(screen.queryByText(/again\.$/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/is SUSPENDED_FOR_REVIEW again/i)).not.toBeInTheDocument()
+  })
+
+  it('shows a content review pending on a staff suspension', async () => {
+    accountState.mockResolvedValue({ ...HELD, accountStatus: 'SUSPENDED', suspensionKind: 'CONTENT',
+      walletFrozen: false })
+    await manage()
+
+    expect(await screen.findByText('Content review pending')).toBeInTheDocument()
+  })
+
   it('unfreezes the wallet with the OTP bound to this wallet only', async () => {
     await manage()
     await userEvent.type(await screen.findByLabelText(/why are you lifting the hold/i), 'dispute won in Stripe')

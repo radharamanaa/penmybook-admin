@@ -72,6 +72,24 @@ Feature: Staff can lift a chargeback or review hold
     And the reactivated account status is "ACTIVE"
     And the reactivation reports the content strikes were not reset
 
+  Scenario: Reactivating with "reset content strikes" tells entitlements staff lifted the content review
+    Given a platform admin is signed in
+    When they reactivate the target user and reset the content strikes
+    Then the response status is 200
+    And entitlements was asked to unsuspend with resetContentStrikes
+    And the reactivation reports the account is not held for a content review
+
+  Scenario: Reactivating a content review without the tick reports the review still stands
+    Given a platform admin is signed in
+    And entitlements keeps the target user held for a content review
+    When they reactivate the target user with a valid step-up token
+    Then the response status is 200
+    And entitlements was asked to unsuspend without resetContentStrikes
+    And the reactivated account status is "SUSPENDED_FOR_REVIEW"
+    And the reactivation reports the account is still held for a content review
+    And the reactivate audit row records the content review still held
+    And the curator was not asked to reset any content strikes
+
   Scenario: Strikes are left alone unless staff ask
     Given a platform admin is signed in
     When they reactivate the target user with a valid step-up token

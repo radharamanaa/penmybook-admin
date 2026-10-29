@@ -36,11 +36,12 @@ export const REFUND_COPY = {
     'This retry did not reach billing — the first attempt may still have gone through. '
     + 'Check the payment, or retry with the same approval (it cannot pay twice).',
   browserNetwork:
-    'Could not reach the admin server — the refund was most likely not sent. '
-    + 'Retrying with the same approval is safe: it cannot pay twice.',
+    'The admin server may have received the refund. Retry with the same approval — that cannot '
+    + "pay twice. Don't start a new code until you have checked the payment.",
   retryNetwork:
-    'This retry most likely did not reach the admin server — the first attempt may still have '
-    + 'gone through. Check the payment, or retry with the same approval (it cannot pay twice).',
+    'The admin server may have received this retry, and the first attempt may still have gone '
+    + 'through. Retry with the same approval — that cannot pay twice. '
+    + "Don't start a new code until you have checked the payment.",
   replayed: 'That refund had already gone through — nothing more was paid.',
   expired: 'The approval has expired — check the payment in Stripe, then start a new refund.',
   approvalUsed:
@@ -60,6 +61,9 @@ export const REFUND_COPY = {
 const CAUSE_BILLING_ERROR = 'billing_error'
 const CAUSE_BILLING_CONFLICT = 'billing_conflict'
 
+// The receipt names the credit refunded; a taxed payment's tax share goes to the card with it.
+const TAX_NOTE = ' (plus any tax refunded with it)'
+
 function outcomeUnknownCopy(err, isRetry) {
   const cause = err?.body?.cause
   if (cause === CAUSE_BILLING_ERROR) return REFUND_COPY.billingError
@@ -68,11 +72,28 @@ function outcomeUnknownCopy(err, isRetry) {
   return isRetry ? REFUND_COPY.retryTimedOut : REFUND_COPY.outcomeUnknown
 }
 
-/** The success line for a payout receipt: a replay paid nothing, a fresh refund names its amount. */
+/**
+ * The success line for a payout receipt. A replay paid nothing. Otherwise `walletDebitedCents` is
+ * what billing actually took back and refunded to the card, and `requestedCents` is billing's
+ * clamped ask: they differ when the customer had already spent part (a shortfall) or all of it.
+ * Billing closes a linked refund request on either. A taxed payment also gets its tax share put on
+ * the card, but billing's receipt does not carry that figure, so the line says so instead of
+ * naming a card total it cannot know.
+ */
 export function refundSuccessCopy(receipt, request) {
   if (receipt?.idempotentReplay) return REFUND_COPY.replayed
-  const cents = Number.isFinite(receipt?.requestedCents) ? receipt.requestedCents : request.amountCents
-  return `Refund issued for payment ${request.paymentId}: ${cents}¢.`
+  const askedCents = Number.isFinite(receipt?.requestedCents) ? receipt.requestedCents : request.amountCents
+  const paidCents = Number.isFinite(receipt?.walletDebitedCents) ? receipt.walletDebitedCents : askedCents
+  const closed = request.refundRequestId ? ', and the refund request is now closed' : ''
+  if (paidCents <= 0) {
+    return `Nothing was refunded for payment ${request.paymentId} — the ${askedCents}¢ asked was `
+      + `already spent${closed}.`
+  }
+  if (paidCents < askedCents) {
+    return `Refunded ${paidCents}¢ of the ${askedCents}¢ asked for payment ${request.paymentId}`
+      + `${TAX_NOTE} — the rest was already spent${closed}.`
+  }
+  return `Refund issued for payment ${request.paymentId}: ${paidCents}¢${TAX_NOTE}.`
 }
 
 /**

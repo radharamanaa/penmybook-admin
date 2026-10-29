@@ -271,6 +271,47 @@ public class PortalAdminSteps {
                 body, boundToken("unsuspend", TARGET_USER, Map.of()));
     }
 
+    @Then("entitlements was asked to unsuspend with resetContentStrikes")
+    public void unsuspendForwardedReset() {
+        AdminWireMock.server().verify(1, postRequestedFor(urlMatching("/internal/admin/unsuspend"))
+                .withRequestBody(matchingJsonPath("$.resetContentStrikes", equalTo("true"))));
+    }
+
+    @Then("entitlements was asked to unsuspend without resetContentStrikes")
+    public void unsuspendWithoutReset() {
+        AdminWireMock.server().verify(1, postRequestedFor(urlMatching("/internal/admin/unsuspend"))
+                .withRequestBody(com.github.tomakehurst.wiremock.client.WireMock.notMatching(
+                        ".*resetContentStrikes.*")));
+    }
+
+    @Given("entitlements keeps the target user held for a content review")
+    public void entitlementsKeepsContentReview() {
+        AdminWireMock.server().stubFor(post(urlMatching("/internal/admin/unsuspend"))
+                .atPriority(1)
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"success\":true,\"auditEntryId\":\"" + UUID.randomUUID()
+                                + "\",\"accountStatus\":\"SUSPENDED_FOR_REVIEW\"}")));
+    }
+
+    @Then("the reactivation reports the account is still held for a content review")
+    public void heldForContentReviewReported() {
+        assertThat(parseBody().path("heldForContentReview").asBoolean(false)).isTrue();
+    }
+
+    @Then("the reactivation reports the account is not held for a content review")
+    public void notHeldForContentReviewReported() {
+        JsonNode body = parseBody();
+        assertThat(body.path("heldForContentReview").isBoolean()).isTrue();
+        assertThat(body.path("heldForContentReview").asBoolean(true)).isFalse();
+    }
+
+    @Then("the reactivate audit row records the content review still held")
+    public void reactivateAuditHeld() {
+        AdminWireMock.server().verify(postRequestedFor(urlMatching("/internal/audit-log"))
+                .withRequestBody(matchingJsonPath("$.action", equalTo("ACCOUNT_REACTIVATE")))
+                .withRequestBody(containing("\"heldForContentReview\":true")));
+    }
+
     @Given("the curator refuses the content-strike reset")
     public void curatorRefusesReset() {
         AdminWireMock.server().stubFor(post(urlPathMatching("/internal/admin/users/.+/content-strikes/reset"))

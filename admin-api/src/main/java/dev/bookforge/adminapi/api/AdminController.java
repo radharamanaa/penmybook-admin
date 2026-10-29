@@ -130,6 +130,8 @@ public class AdminController {
     private static final String STEP_UP_ACTION_WALLET_TOP_UP = "wallet_top_up";
     /** Reactivate a suspended account. Hash binds the target user only (no params). */
     private static final String STEP_UP_ACTION_UNSUSPEND = "unsuspend";
+    /** A successful reactivation that ends here lifted a staff or payment hold, but a content review stands (O-3). */
+    private static final String ACCOUNT_STATUS_SUSPENDED_FOR_REVIEW = "SUSPENDED_FOR_REVIEW";
     /** Lift a wallet freeze. Hash is {ownerType, ownerId}; billing verifies and spends it. */
     private static final String STEP_UP_ACTION_WALLET_UNFREEZE = "wallet_unfreeze";
     /** Settle an approved request paid out by hand in Stripe. Hash {requestId, providerRefundId}. */
@@ -822,8 +824,10 @@ public class AdminController {
             return stepUpRejectionResponse(outcome.rejectionReason(), STEP_UP_ACTION_UNSUSPEND, params);
         }
 
+        boolean heldForContentReview = ACCOUNT_STATUS_SUSPENDED_FOR_REVIEW.equals(outcome.accountStatus());
         Map<String, Object> newValue = new LinkedHashMap<>();
         newValue.put("accountStatus", outcome.accountStatus());
+        newValue.put("heldForContentReview", heldForContentReview);
         newValue.put("note", body.note());
         newValue.put("acknowledgeWalletUnknown", acknowledgeWalletUnknown);
         newValue.put("resetContentStrikes", resetContentStrikes);
@@ -833,7 +837,8 @@ public class AdminController {
         auditEventWriter.writeAllow(actorOf(jwt), ACTION_ACCOUNT_REACTIVATE, RESOURCE_USER,
                 userId.toString(), null, newValue, clientIp(request));
         return ResponseEntity.ok(new AccountReactivatedView(userId, outcome.accountStatus(),
-                outcome.auditEntryId(), outcome.contentStrikesReset(), outcome.contentStrikesResetError()));
+                outcome.auditEntryId(), outcome.contentStrikesReset(), outcome.contentStrikesResetError(),
+                heldForContentReview));
     }
 
     /**

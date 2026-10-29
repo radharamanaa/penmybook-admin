@@ -32,10 +32,10 @@ const COPY = {
     'The retry timed out too — the refund may have gone through. Check the payment before retrying.',
   notSent: 'Billing could not be reached — nothing was sent. It is safe to retry.',
   browserNetwork:
-    'Could not reach the admin server — the refund was most likely not sent. '
-    + 'Retrying with the same approval is safe: it cannot pay twice.',
+    'The admin server may have received the refund. Retry with the same approval — that cannot '
+    + "pay twice. Don't start a new code until you have checked the payment.",
   replayed: 'That refund had already gone through — nothing more was paid.',
-  paid: `Refund issued for payment ${PAYMENT_ID}: 874¢.`,
+  paid: `Refund issued for payment ${PAYMENT_ID}: 874¢ (plus any tax refunded with it).`,
   expired: 'The approval has expired — check the payment in Stripe, then start a new refund.',
   approvalUsed:
     'This approval was already used — the first attempt may still be going through. '
@@ -52,8 +52,13 @@ const COPY = {
     + 'Check the payment before retrying.',
   readyForNewRefund: 'You can start a new refund now — check the payment in Stripe first.',
   retryNetwork:
-    'This retry most likely did not reach the admin server — the first attempt may still have '
-    + 'gone through. Check the payment, or retry with the same approval (it cannot pay twice).',
+    'The admin server may have received this retry, and the first attempt may still have gone '
+    + 'through. Retry with the same approval — that cannot pay twice. '
+    + "Don't start a new code until you have checked the payment.",
+  shortfall: `Refunded 500¢ of the 874¢ asked for payment ${PAYMENT_ID} (plus any tax refunded `
+    + 'with it) — the rest was already spent, and the refund request is now closed.',
+  nothingLeft: `Nothing was refunded for payment ${PAYMENT_ID} — the 874¢ asked was already spent, `
+    + 'and the refund request is now closed.',
 }
 
 function apiError(status, body, message = 'request failed') {
@@ -116,7 +121,7 @@ describe('Users payout: retry with the same approval', () => {
 
   it('resends the identical request with the same token and says a replay paid nothing', async () => {
     refund.mockRejectedValueOnce(timedOut())
-      .mockResolvedValueOnce({ idempotentReplay: true, requestedCents: 874 })
+      .mockResolvedValueOnce({ idempotentReplay: true, requestedCents: 874, walletDebitedCents: 874 })
     await payOut()
     await user.click(await screen.findByRole('button', { name: RETRY }))
 
@@ -131,7 +136,7 @@ describe('Users payout: retry with the same approval', () => {
   })
 
   it('resends the stored request even if the fields were edited before the timeout', async () => {
-    refund.mockRejectedValueOnce(timedOut()).mockResolvedValueOnce({ requestedCents: 874 })
+    refund.mockRejectedValueOnce(timedOut()).mockResolvedValueOnce({ requestedCents: 874, walletDebitedCents: 874 })
     renderUsers()
     await user.click(screen.getByRole('button', { name: /start otp refund/i }))
     const amount = screen.getByLabelText(/refund amount \(cents\)/i)
@@ -147,7 +152,7 @@ describe('Users payout: retry with the same approval', () => {
 
   it('shows the normal success with the amount when the retry pays now', async () => {
     refund.mockRejectedValueOnce(timedOut())
-      .mockResolvedValueOnce({ idempotentReplay: false, requestedCents: 874 })
+      .mockResolvedValueOnce({ idempotentReplay: false, requestedCents: 874, walletDebitedCents: 874 })
     await payOut()
     await user.click(await screen.findByRole('button', { name: RETRY }))
 
@@ -156,13 +161,26 @@ describe('Users payout: retry with the same approval', () => {
   })
 
   it('names billing\'s clamped amount, not the asked one, on success', async () => {
-    refund.mockResolvedValueOnce({ idempotentReplay: false, requestedCents: 500 })
+    refund.mockResolvedValueOnce({ idempotentReplay: false, requestedCents: 500, walletDebitedCents: 500 })
     await payOut()
-    expect(await screen.findByText(`Refund issued for payment ${PAYMENT_ID}: 500¢.`)).toBeInTheDocument()
+    expect(await screen.findByText(`Refund issued for payment ${PAYMENT_ID}: 500¢ (plus any tax refunded with it).`)).toBeInTheDocument()
+  })
+
+  it('names what was paid, not the ask, on a shortfall payout, and says the request closed', async () => {
+    refund.mockResolvedValueOnce({ idempotentReplay: false, requestedCents: 874, walletDebitedCents: 500 })
+    await payOut()
+    expect(await screen.findByText(COPY.shortfall)).toBeInTheDocument()
+    expect(screen.queryByText(/Refund issued/)).toBeNull()
+  })
+
+  it('says nothing was refunded when the whole ask was already spent', async () => {
+    refund.mockResolvedValueOnce({ idempotentReplay: false, requestedCents: 874, walletDebitedCents: 0 })
+    await payOut()
+    expect(await screen.findByText(COPY.nothingLeft)).toBeInTheDocument()
   })
 
   it('says a first-try replay paid nothing', async () => {
-    refund.mockResolvedValueOnce({ idempotentReplay: true, requestedCents: 874 })
+    refund.mockResolvedValueOnce({ idempotentReplay: true, requestedCents: 874, walletDebitedCents: 874 })
     await payOut()
     expect(await screen.findByText(COPY.replayed)).toBeInTheDocument()
   })
@@ -335,7 +353,7 @@ describe('Users payout: retry with the same approval', () => {
 
   it('says nothing was sent when billing could not be reached, and offers the retry', async () => {
     refund.mockRejectedValueOnce(apiError(503, { code: 'REFUND_NOT_SENT' }))
-      .mockResolvedValueOnce({ requestedCents: 874 })
+      .mockResolvedValueOnce({ requestedCents: 874, walletDebitedCents: 874 })
     await payOut()
 
     expect(await screen.findByText(COPY.notSent)).toBeInTheDocument()
@@ -409,7 +427,7 @@ describe('Users payout: retry with the same approval', () => {
     expect(screen.queryByLabelText(/otp code/i)).toBeNull()
     expect(screen.getByRole('button', { name: /start otp refund/i })).toBeDisabled()
     expect(screen.getByLabelText(/refund amount \(cents\)/i)).toBeDisabled()
-    await act(async () => { settle({ requestedCents: 874 }) })
+    await act(async () => { settle({ requestedCents: 874, walletDebitedCents: 874 }) })
     expect(await screen.findByText(COPY.paid)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /start otp refund/i })).toBeEnabled()
   })
@@ -430,7 +448,7 @@ describe('Users payout: retry with the same approval', () => {
     expect(otpStart).toHaveBeenCalledTimes(1)
   })
 
-  it('says the request most likely was not sent when the browser could not reach admin-api', async () => {
+  it('says the admin server may have received it when the browser could not reach admin-api', async () => {
     refund.mockRejectedValueOnce(apiError(0, { code: 'NETWORK_ERROR' }))
     await payOut()
 
@@ -498,7 +516,7 @@ describe('Users payout: retry with the same approval', () => {
   it('verifies the OTP once however often Verify is clicked', async () => {
     let settle
     otpVerify.mockImplementationOnce(() => new Promise((resolve) => { settle = resolve }))
-    refund.mockResolvedValueOnce({ requestedCents: 874 })
+    refund.mockResolvedValueOnce({ requestedCents: 874, walletDebitedCents: 874 })
     renderUsers()
     await user.click(screen.getByRole('button', { name: /start otp refund/i }))
     await user.type(screen.getByLabelText(/otp code/i), '123456')

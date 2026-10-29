@@ -194,7 +194,7 @@ public class AdminService {
         DownstreamResult result;
         try {
             result = callDownstream(
-                    () -> downstream.unsuspend(command, acknowledgeWalletUnknown),
+                    () -> downstream.unsuspend(command, acknowledgeWalletUnknown, resetContentStrikes),
                     () -> new DownstreamResult(false, null, null));
         } catch (DownstreamConflictException refused) {
             return UnsuspendOutcome.refused(refused.code(), refused.detail());

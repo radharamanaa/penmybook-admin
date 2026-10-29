@@ -161,10 +161,14 @@ public class HttpDownstreamClient implements DownstreamClient {
     }
 
     @Override
-    public DownstreamResult unsuspend(AdminCommand command, boolean acknowledgeWalletUnknown) {
+    public DownstreamResult unsuspend(AdminCommand command, boolean acknowledgeWalletUnknown,
+                                      boolean resetContentStrikes) {
         Map<String, Object> body = statusChangeBody(command, null);
         if (acknowledgeWalletUnknown) {
             body.put("acknowledgeWalletUnknown", true);
+        }
+        if (resetContentStrikes) {
+            body.put("resetContentStrikes", true);
         }
         try {
             JsonNode json = send(downstream.entitlementsUrl() + "/internal/admin/unsuspend", ENTITLEMENTS_AUD,

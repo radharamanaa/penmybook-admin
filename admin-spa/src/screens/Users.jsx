@@ -160,6 +160,20 @@ const HOLD_KIND_LABELS = {
   CONTENT: 'content review',
 }
 
+// A content escalation that reached a staff suspension: lifting the suspension brings the review back.
+const CONTENT_REVIEW_PENDING_LABEL = 'Content review pending'
+// The reactivation lifted a staff or payment hold, but the content review stands (owner O-3: only a
+// reactivation that resets the content strikes lifts it).
+const heldForContentReviewCopy = (email) =>
+  `${email} is still held for a content review. Tick “Reset content strikes” and reactivate again to lift it.`
+
+function holdKindLabel(state) {
+  if (state.accountStatus === 'SUSPENDED' && state.suspensionKind === 'CONTENT') {
+    return CONTENT_REVIEW_PENDING_LABEL
+  }
+  return HOLD_KIND_LABELS[state.suspensionKind]
+}
+
 // Shown before a reactivation billing could not check (owner Q-D, 29 Oct 2026).
 const WALLET_UNKNOWN_CONFIRM_COPY =
   "Billing did not answer, so we can't tell if the wallet is frozen. Reactivate anyway?"
@@ -198,8 +212,8 @@ function HoldPanel({ state, note, onNoteChange, onReactivate, onUnfreeze, resetS
         Account: <span className="hold-status">
           {(state.accountStatus ?? 'unknown').toLowerCase().replaceAll('_', ' ')}
         </span>
-        {suspended && HOLD_KIND_LABELS[state.suspensionKind] && (
-          <> — <strong>{HOLD_KIND_LABELS[state.suspensionKind]}</strong></>
+        {suspended && holdKindLabel(state) && (
+          <> — <strong>{holdKindLabel(state)}</strong></>
         )}
         {state.walletFrozen && <> · Wallet frozen (<code>{state.walletFrozenReason}</code>)</>}
         {walletUnknown && <> · Wallet: unknown — billing did not answer</>}
@@ -397,6 +411,8 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
         const r = await api.unsuspend(user.userId, otp.note, v.stepUpToken, otp.flags)
         if (r.contentStrikesReset === false) {
           onError(r.contentStrikesResetError)
+        } else if (r.heldForContentReview) {
+          onDone(heldForContentReviewCopy(user.email))
         } else {
           onDone(`${user.email} is ${r.accountStatus} again.${r.contentStrikesReset ? ' Content strikes reset.' : ''}`)
         }

@@ -52,9 +52,11 @@ public interface DownstreamClient {
      * entitlements {@code POST /internal/admin/unsuspend}. A 409 refusal (the wallet is frozen by a
      * payment hold, or billing did not answer and staff did not acknowledge it) is thrown as
      * {@link DownstreamConflictException} carrying entitlements' {@code code} and {@code detail};
-     * any other failure comes back as {@code success=false}.
+     * any other failure comes back as {@code success=false}. {@code resetContentStrikes}: staff decided
+     * to lift a content review too (O-3); without it a content review stands and the answer's
+     * {@code accountStatus} is SUSPENDED_FOR_REVIEW.
      */
-    DownstreamResult unsuspend(AdminCommand command, boolean acknowledgeWalletUnknown);
+    DownstreamResult unsuspend(AdminCommand command, boolean acknowledgeWalletUnknown, boolean resetContentStrikes);
 
     /**
      * book_curator {@code GET /internal/admin/users/{userId}/content-strikes} (L5). Null when the
