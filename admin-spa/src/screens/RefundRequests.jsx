@@ -65,11 +65,24 @@ function PayoutLinks({ row }) {
       </Link>,
     )
   }
-  const outOfWindow = payments.filter((p) => !p.inWindow).length
+  const outOfWindowPayments = payments.filter((p) => !p.inWindow)
+  const outOfWindow = outOfWindowPayments.length
   if (links.length === 0) {
-    // Nothing payable to a card (all past 120 days, or nothing owed): the bare link is still the way
-    // to close the request — a payout attempt settles it as unpayable.
-    links.push(<Link key="bare" className="small" to={payoutHref(row)}>Pay out</Link>)
+    // Nothing payable to a card (all past 120 days, or nothing owed): a payout attempt against the
+    // payment closes the request as unpayable. The Users form needs a payment id for that, so name
+    // the out-of-window one(s); a bare link left staff with nothing to submit (R2).
+    owed = Math.max(0, (row.approvedAmountCents ?? 0) - (row.refundedCents ?? 0))
+    for (const payment of outOfWindowPayments) {
+      links.push(
+        <Link key={payment.paymentId} className="small"
+              to={payoutHref(row, payment.paymentId, owed)}>
+          Pay out from …{payment.paymentId.slice(-4)}
+        </Link>,
+      )
+    }
+    if (links.length === 0) {
+      links.push(<Link key="bare" className="small" to={payoutHref(row)}>Pay out</Link>)
+    }
   }
   return (
     <div style={{ display: 'grid', gap: 4 }}>
@@ -77,6 +90,26 @@ function PayoutLinks({ row }) {
       {outOfWindow > 0 && (
         <span className="sub">{outOfWindow} payment(s) past the 120-day card-refund limit</span>
       )}
+    </div>
+  )
+}
+
+/**
+ * An org request has no payout path here: staff refund it in the Stripe Dashboard, then mark it
+ * paid by hand. Shows what to refund and from which payments.
+ */
+function OrgPayByHand({ row }) {
+  const payments = row.payments ?? []
+  const owed = Math.max(0, (row.approvedAmountCents ?? 0) - (row.refundedCents ?? 0))
+  return (
+    <div style={{ display: 'grid', gap: 4 }}>
+      <span className="badge warn">Org wallet — pay out by hand in Stripe</span>
+      <span className="sub">Approved {fmtCents(row.approvedAmountCents)}; still owed {fmtCents(owed)}</span>
+      {payments.map((p) => (
+        <span key={p.paymentId} className="mono" style={{ fontSize: 11 }}>
+          {p.paymentId} — {fmtCents(p.remainingCents)} left{p.inWindow ? '' : ' (past 120 days)'}
+        </span>
+      ))}
     </div>
   )
 }
@@ -112,6 +145,10 @@ export default function RefundRequests() {
   const [code, setCode] = useState('')
   const [note, setNote] = useState('')
   const [amountDraft, setAmountDraft] = useState('')
+  // "Mark paid by hand": { request, refundId, note, challengeId, params, code }
+  const [markPaid, setMarkPaid] = useState(null)
+  const markPaidRef = useRef(null)
+  useScrollIntoViewOnPhone(markPaidRef, markPaid)
   const confirmRef = useRef(null)
   useScrollIntoViewOnPhone(confirmRef, otp)
   // Results show at the page top, above both tables; bring them into view on a phone.
@@ -154,6 +191,7 @@ export default function RefundRequests() {
     try {
       // targetUserId MUST be null — copying Users.jsx's user.userId 403s every action.
       const resp = await api.otpStart('resolve_refund_request', null, params)
+      setMarkPaid(null)
       setOtp({ request, action: 'resolve_refund_request', challengeId: resp.challengeId, params })
       setCode('')
       setNote('')
@@ -197,6 +235,48 @@ export default function RefundRequests() {
         await load()
         return
       }
+      setError(err.message)
+    }
+  }
+
+  function openMarkPaid(request) {
+    setError(null)
+    setOk(null)
+    setOtp(null)
+    setMarkPaid({ request, refundId: '', note: '', challengeId: null, params: null, code: '' })
+  }
+
+  async function startMarkPaidOtp() {
+    const params = { requestId: markPaid.request.id, providerRefundId: markPaid.refundId.trim() }
+    setError(null)
+    try {
+      // The target is the request's owner — a user, or the org for an org request.
+      const resp = await api.otpStart('refund_mark_paid', markPaid.request.ownerId, params)
+      setMarkPaid({ ...markPaid, challengeId: resp.challengeId, params, code: '' })
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function verifyAndMarkPaid() {
+    const { request, params, challengeId, code: otpCode, note: markNote } = markPaid
+    setError(null)
+    setOk(null)
+    try {
+      const v = await api.otpVerify(challengeId, otpCode, 'refund_mark_paid', request.ownerId, params)
+      if (!v.verified) {
+        setError(`Code rejected: ${v.failureReason ?? 'invalid'}`)
+        return
+      }
+      await api.markRefundPaidByHand(
+        params.requestId, request.ownerId, params.providerRefundId,
+        markNote.trim() || null, v.stepUpToken,
+      )
+      setOk(`Marked paid by hand with Stripe refund ${params.providerRefundId}.`)
+      setMarkPaid(null)
+      await load()
+    } catch (err) {
+      // Billing's own words: the refund is not seen yet, already used, or a note is needed.
       setError(err.message)
     }
   }
@@ -304,7 +384,14 @@ export default function RefundRequests() {
                         </button>
                       </div>
                     )}
-                    {row.status === 'APPROVED' && <PayoutLinks row={row} />}
+                    {row.status === 'APPROVED' && (
+                      <div style={{ display: 'grid', gap: 6 }}>
+                        {row.ownerType === 'ORG' ? <OrgPayByHand row={row} /> : <PayoutLinks row={row} />}
+                        <button type="button" className="ghost small" onClick={() => openMarkPaid(row)}>
+                          Mark paid by hand
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -404,6 +491,52 @@ export default function RefundRequests() {
             </button>
             <button type="button" className="ghost" onClick={() => setOtp(null)}>Cancel</button>
           </div>
+        </div>
+      )}
+
+      {markPaid && (
+        <div ref={markPaidRef} className="panel" style={{ marginTop: 16 }}>
+          <h2 style={{ marginTop: 0 }}>
+            Mark <code>{markPaid.request.id}</code> paid by hand
+          </h2>
+          <p className="sub">
+            Refund it in the Stripe Dashboard first, then enter that refund&apos;s id. Approved{' '}
+            {fmtCents(markPaid.request.approvedAmountCents)}. A note is needed when Stripe refunded less.
+          </p>
+          <div className="row">
+            <div>
+              <label htmlFor="mark-paid-refund-id">Stripe refund id</label>
+              <input id="mark-paid-refund-id" value={markPaid.refundId} placeholder="re_…"
+                     readOnly={markPaid.challengeId != null}
+                     onChange={(e) => setMarkPaid({ ...markPaid, refundId: e.target.value })} />
+            </div>
+            <div>
+              <label htmlFor="mark-paid-note">Note</label>
+              <input id="mark-paid-note" value={markPaid.note} maxLength={2000}
+                     onChange={(e) => setMarkPaid({ ...markPaid, note: e.target.value })} />
+            </div>
+          </div>
+          {markPaid.challengeId == null ? (
+            <div className="row">
+              <button type="button" disabled={!markPaid.refundId.trim()} onClick={startMarkPaidOtp}>
+                Start OTP
+              </button>
+              <button type="button" className="ghost" onClick={() => setMarkPaid(null)}>Cancel</button>
+            </div>
+          ) : (
+            <div className="row">
+              <div>
+                <label htmlFor="mark-paid-code">OTP code (check email / dev DB)</label>
+                <input id="mark-paid-code" value={markPaid.code} inputMode="numeric"
+                       autoComplete="one-time-code" maxLength={6}
+                       onChange={(e) => setMarkPaid({ ...markPaid, code: e.target.value })} />
+              </div>
+              <button type="button" disabled={markPaid.code.length < 6} onClick={verifyAndMarkPaid}>
+                Verify &amp; mark paid
+              </button>
+              <button type="button" className="ghost" onClick={() => setMarkPaid(null)}>Cancel</button>
+            </div>
+          )}
         </div>
       )}
 

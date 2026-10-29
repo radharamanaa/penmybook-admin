@@ -8,6 +8,7 @@ import dev.bookforge.adminapi.downstream.DownstreamClient;
 import dev.bookforge.adminapi.downstream.DownstreamResult;
 import dev.bookforge.adminapi.downstream.ForceResolveReversedCallResult;
 import dev.bookforge.adminapi.downstream.HttpDownstreamClient;
+import dev.bookforge.adminapi.downstream.MarkPaidByHandCallResult;
 import dev.bookforge.adminapi.downstream.RefundRequestResolveResult;
 import dev.bookforge.adminapi.downstream.ServiceAccountTokenFactory;
 import dev.bookforge.adminapi.downstream.WalletUnfreezeCallResult;
@@ -18,6 +19,7 @@ import dev.bookforge.adminapi.dto.AdminActionResult;
 import dev.bookforge.adminapi.dto.AdminCommand;
 import dev.bookforge.adminapi.dto.OrgView;
 import dev.bookforge.adminapi.dto.OrgWalletStateView;
+import dev.bookforge.adminapi.dto.RefundRequestQueueEntry;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import dev.bookforge.adminapi.security.AdminParamsHasher;
 import dev.bookforge.adminapi.security.InMemoryStepUpTokenStore;
@@ -64,19 +66,22 @@ public class AdminService {
     private static final String RESOLVE_REFUND_REQUEST = "resolve_refund_request";
     private static final String WALLET_TOP_UP = "wallet_top_up";
     private static final String WALLET_UNFREEZE = "wallet_unfreeze";
+    private static final String REFUND_MARK_PAID = "refund_mark_paid";
 
     /**
      * Actions whose step-up token billing verifies AND spends in its own {@code step_up_consumption}
      * ledger. admin-api checks them but does not claim them, so a 502 cannot leave an approval
      * that is spent here yet never used there (G1).
      */
-    private static final java.util.Set<String> BILLING_SPENDS_TOKEN = java.util.Set.of(REFUND, WALLET_UNFREEZE);
+    private static final java.util.Set<String> BILLING_SPENDS_TOKEN = java.util.Set.of(REFUND, WALLET_UNFREEZE, REFUND_MARK_PAID);
 
     private static final String USER_OWNER_TYPE = "USER";
     private static final String ORG_OWNER_TYPE = "ORG";
 
     private static final String REJECT_STEP_UP_REQUIRED = "step_up_required";
     private static final String REJECT_STEP_UP_INVALID = "step_up_invalid";
+    /** The payout call timed out: the card refund may have happened. Never a plain failure. */
+    public static final String REFUND_OUTCOME_UNKNOWN = "refund_outcome_unknown";
 
     private final StepUpVerifier stepUpVerifier;
     private final AdminParamsHasher paramsHasher;
@@ -329,6 +334,9 @@ public class AdminService {
         DownstreamResult result = callDownstream(
                 () -> downstream.refund(command),
                 () -> new DownstreamResult(false, null, null));
+        if (result.outcomeUnknown()) {
+            return RefundOutcome.rejected(REFUND_OUTCOME_UNKNOWN);
+        }
         if (!result.success()) {
             return RefundOutcome.downstreamRejected();
         }
@@ -387,6 +395,48 @@ public class AdminService {
         }
     }
 
+    /**
+     * Settle an APPROVED refund request staff paid out by hand in the Stripe Dashboard (an org
+     * request has no payout path here). The token is bound over {@code {requestId,
+     * providerRefundId}} with the request's owner as the target, and billing spends it. The note is
+     * sent to billing but is not in the hash, like a resolve note.
+     */
+    public MarkPaidByHandOutcome markRefundPaidByHand(AdminCommand command, String note) {
+        StepUpVerifier.Result gate = gate(REFUND_MARK_PAID, command);
+        if (gate instanceof StepUpVerifier.Result.Missing) {
+            return MarkPaidByHandOutcome.rejected(REJECT_STEP_UP_REQUIRED);
+        }
+        if (!(gate instanceof StepUpVerifier.Result.Valid)) {
+            return MarkPaidByHandOutcome.rejected(REJECT_STEP_UP_INVALID);
+        }
+        MarkPaidByHandCallResult result = callDownstream(
+                () -> downstream.markRefundPaidByHand(command, note),
+                MarkPaidByHandCallResult::failed);
+        if (result.success()) {
+            return new MarkPaidByHandOutcome(true, result.request(), null, 0, null, null);
+        }
+        return new MarkPaidByHandOutcome(false, null, null, result.refusedStatus(),
+                result.refusedCode(), result.refusedMessage());
+    }
+
+    /**
+     * Outcome of "mark paid by hand". {@code rejectionReason} is admin-api's own step-up verdict;
+     * {@code refusedStatus} &gt; 0 is billing's refusal, whose message staff see verbatim; neither
+     * means billing did not answer.
+     */
+    public record MarkPaidByHandOutcome(
+            boolean success,
+            RefundRequestQueueEntry request,
+            String rejectionReason,
+            int refusedStatus,
+            String refusedCode,
+            String refusedMessage) {
+
+        static MarkPaidByHandOutcome rejected(String reason) {
+            return new MarkPaidByHandOutcome(false, null, reason, 0, null, null);
+        }
+    }
+
     public record ForceResolveOutcome(
             boolean success,
             UUID paymentId,
@@ -425,8 +475,8 @@ public class AdminService {
             return WalletTopUpOutcome.rejected(REJECT_STEP_UP_INVALID);
         }
         try {
-            long balanceCents = downstream.walletTopUp(command.targetUserId(), amountCents, reason)
-                    .balanceCents();
+            long balanceCents = downstream.walletTopUp(command.targetUserId(), amountCents, reason,
+                    command.stepUpToken()).balanceCents();
             return WalletTopUpOutcome.success(balanceCents);
         } catch (CallNotPermittedException e) {
             return WalletTopUpOutcome.rejected(null);

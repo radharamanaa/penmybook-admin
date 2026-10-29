@@ -77,6 +77,13 @@ public interface DownstreamClient {
      */
     WalletUnfreezeCallResult unfreezeWallet(AdminCommand command, String note);
 
+    /**
+     * billing {@code POST /internal/admin/refund-requests/{requestId}/mark-paid-by-hand}. Billing
+     * verifies and spends the {@code refund_mark_paid} token (bound over {@code {requestId,
+     * providerRefundId}}, target = the request's owner) and returns the settled request.
+     */
+    MarkPaidByHandCallResult markRefundPaidByHand(AdminCommand command, String note);
+
     /** read-through account status for the target user (entitlements admin profile). */
     AccountStatusView accountStatus(UUID userId);
 
@@ -115,9 +122,10 @@ public interface DownstreamClient {
 
     /**
      * billing {@code POST /internal/wallet/credit} — admin wallet top-up. Returns the new
-     * wallet balance so the controller can surface it directly to the SPA.
+     * wallet balance so the controller can surface it directly to the SPA. The step-up token's
+     * challenge id becomes billing's idempotency key, so one approval credits at most once.
      */
-    WalletBalanceView walletTopUp(UUID userId, long amountCents, String reason);
+    WalletBalanceView walletTopUp(UUID userId, long amountCents, String reason, String stepUpToken);
 
     /**
      * entitlements {@code PATCH /internal/admin/users/{userId}} — set the {@code is_platform_admin}

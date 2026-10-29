@@ -72,6 +72,23 @@ describe('Users refundRequestId (U4 / S7)', () => {
     )
   })
 
+  it('says a timed-out payout may have gone through instead of a plain failure (A1)', async () => {
+    refund.mockRejectedValue(Object.assign(new Error('gateway timeout'), {
+      status: 504, body: { code: 'REFUND_OUTCOME_UNKNOWN' },
+    }))
+    renderUsers(
+      `?refundRequestId=${REQUEST_ID}&ownerType=USER&ownerId=u1&ownerEmail=a@b.co`
+        + `&paymentId=${PAYMENT_ID}&amountCents=874`,
+    )
+    await userEvent.click(screen.getByRole('button', { name: /start otp refund/i }))
+    await userEvent.type(screen.getByLabelText(/otp code/i), '123456')
+    await userEvent.click(screen.getByRole('button', { name: /verify & execute/i }))
+
+    expect(await screen.findByText(
+      'The refund may have gone through — check the payment before retrying.',
+    )).toBeInTheDocument()
+  })
+
   it('fills the amount from a per-payment pay-out link (P1)', async () => {
     renderUsers(
       `?refundRequestId=${REQUEST_ID}&ownerType=USER&ownerId=u1&ownerEmail=a@b.co`

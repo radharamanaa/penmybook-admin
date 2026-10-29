@@ -9,6 +9,10 @@ package dev.bookforge.adminapi.downstream;
  */
 public class DownstreamConflictException extends DownstreamCallException {
     public DownstreamConflictException(String message) {
-        super(message, null);
+        super(message, null, 409, null, null);
+    }
+
+    public DownstreamConflictException(String message, String detail, String code) {
+        super(message, null, 409, detail, code);
     }
 }

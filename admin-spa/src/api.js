@@ -123,6 +123,8 @@ export const api = {
       body: { amountCents },
       headers: { 'X-Step-Up-Token': stepUpToken },
     }),
+  // A payout calls Stripe inline; admin-api waits up to 60s for billing, so the browser must
+  // outlast it. The default 12s abort read as "failed" while the card refund still landed.
   refund: (userId, paymentId, amountCents, reason, stepUpToken, refundRequestId) =>
     request(`/api/v1/admin/users/${userId}/refund`, {
       method: 'POST',
@@ -130,6 +132,7 @@ export const api = {
         ? { paymentId, amountCents, reason, refundRequestId }
         : { paymentId, amountCents, reason },
       headers: { 'X-Step-Up-Token': stepUpToken },
+      timeoutMs: 65_000,
     }),
   // ── account holds (F3): why a user is held, and the two step-up lifts ──
   accountState: (userId) => request(`/api/v1/admin/users/${userId}/account-state`),
@@ -170,6 +173,14 @@ export const api = {
       body: { decision, amountCents, note },
       headers: { 'X-Step-Up-Token': stepUpToken },
       timeoutMs: 35_000,
+    }),
+  // Settle an approved request staff refunded by hand in the Stripe Dashboard (org requests).
+  // ownerId is the step-up target; billing's refusals come back as the error message.
+  markRefundPaidByHand: (id, ownerId, providerRefundId, note, stepUpToken) =>
+    request(`/api/v1/admin/refund-requests/${id}/mark-paid-by-hand`, {
+      method: 'POST',
+      body: { ownerId, providerRefundId, note },
+      headers: { 'X-Step-Up-Token': stepUpToken },
     }),
   unrecoveredPayments: () => request('/api/v1/admin/payments/unrecovered'),
   // ── pricing (admin-api → entitlements) ──

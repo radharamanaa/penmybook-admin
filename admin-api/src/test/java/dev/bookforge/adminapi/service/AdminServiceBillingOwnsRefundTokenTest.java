@@ -3,6 +3,7 @@ package dev.bookforge.adminapi.service;
 import dev.bookforge.adminapi.downstream.DownstreamClient;
 import dev.bookforge.adminapi.downstream.DownstreamResult;
 import dev.bookforge.adminapi.downstream.ForceResolveReversedCallResult;
+import dev.bookforge.adminapi.downstream.MarkPaidByHandCallResult;
 import dev.bookforge.adminapi.dto.AdminCommand;
 import dev.bookforge.adminapi.security.AdminParamsHasher;
 import dev.bookforge.adminapi.security.StepUpTokenStore;
@@ -101,6 +102,57 @@ class AdminServiceBillingOwnsRefundTokenTest {
         assertThat(adminService.forceResolveReversed(command).success()).isTrue();
         verify(tokenStore, never()).markConsumedOnce(any(), anyLong());
         verify(downstream).forceResolveReversed(command);
+    }
+
+    @Test
+    void aTimedOutRefundIsOutcomeUnknownNotRejected() {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("paymentId", UUID.randomUUID().toString());
+        params.put("refundAmountCents", 2_500L);
+        String hash = hasher.compute("refund", staff, target, params);
+        when(verifier.verify("token", "refund"))
+                .thenReturn(new StepUpVerifier.Result.Valid("chal", hash, Instant.now().getEpochSecond() + 60));
+        when(downstream.refund(any())).thenReturn(DownstreamResult.refundOutcomeUnknown());
+
+        AdminService.RefundOutcome outcome =
+                adminService.refund(new AdminCommand(staff, target, "refund", "token", params));
+
+        assertThat(outcome.success()).isFalse();
+        assertThat(outcome.rejectionReason()).isEqualTo(AdminService.REFUND_OUTCOME_UNKNOWN);
+    }
+
+    @Test
+    void markPaidByHandLeavesTheTokenForBillingToSpend() {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("requestId", UUID.randomUUID().toString());
+        params.put("providerRefundId", "re_123");
+        String hash = hasher.compute("refund_mark_paid", staff, target, params);
+        when(verifier.verify("token", "refund_mark_paid"))
+                .thenReturn(new StepUpVerifier.Result.Valid("chal", hash, Instant.now().getEpochSecond() + 60));
+        when(downstream.markRefundPaidByHand(any(), eq("note")))
+                .thenReturn(MarkPaidByHandCallResult.ok(null));
+
+        AdminCommand command = new AdminCommand(staff, target, "refund_mark_paid", "token", params);
+        assertThat(adminService.markRefundPaidByHand(command, "note").success()).isTrue();
+        verify(tokenStore, never()).markConsumedOnce(any(), anyLong());
+    }
+
+    @Test
+    void markPaidByHandRefusesATokenBoundToAnotherRefundId() {
+        Map<String, Object> signed = new LinkedHashMap<>();
+        signed.put("requestId", "r1");
+        signed.put("providerRefundId", "re_signed");
+        String hash = hasher.compute("refund_mark_paid", staff, target, signed);
+        when(verifier.verify("token", "refund_mark_paid"))
+                .thenReturn(new StepUpVerifier.Result.Valid("chal", hash, Instant.now().getEpochSecond() + 60));
+        Map<String, Object> sent = new LinkedHashMap<>(signed);
+        sent.put("providerRefundId", "re_other");
+
+        AdminService.MarkPaidByHandOutcome outcome = adminService.markRefundPaidByHand(
+                new AdminCommand(staff, target, "refund_mark_paid", "token", sent), null);
+
+        assertThat(outcome.rejectionReason()).isEqualTo("step_up_invalid");
+        verify(downstream, never()).markRefundPaidByHand(any(), any());
     }
 
     @Test

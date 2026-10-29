@@ -28,11 +28,12 @@ const errorResponse = (status, body) => ({
 const STEP_UP_WRITES = [
   ['walletTopUp', () => api.walletTopUp('u1', 500, 'admin top-up', 'tok-abc')],
   ['grantCredits', () => api.grantCredits('u1', 500, 'tok-abc')],
-  ['refund', () => api.refund('u1', 'pay1', 500, 'admin refund', 'tok-abc')],
+  ['refund', () => api.refund('u1', 'pay1', 500, 'admin refund', 'tok-abc'), 65_000],
   ['forceResolveReversed', () => api.forceResolveReversed('u1', 'pay1', 'Stripe refund re_01 confirmed failed', 'tok-abc')],
   ['unsuspend', () => api.unsuspend('u1', 'dispute won in Stripe', 'tok-abc')],
   ['unfreezeWallet', () => api.unfreezeWallet('u1', 'dispute won in Stripe', 'tok-abc')],
   ['unfreezeOrgWallet', () => api.unfreezeOrgWallet('o1', 'dispute won in Stripe', 'tok-abc')],
+  ['markRefundPaidByHand', () => api.markRefundPaidByHand('req-1', 'o1', 're_123', null, 'tok-abc')],
 ]
 
 describe('api.js', () => {
@@ -47,7 +48,7 @@ describe('api.js', () => {
     vi.restoreAllMocks()
   })
 
-  describe.each(STEP_UP_WRITES)('%s', (name, call) => {
+  describe.each(STEP_UP_WRITES)('%s', (name, call, abortAfterMs = 12_000) => {
     it('sends the step-up token and the admin JWT together', async () => {
       await call()
       const [, init] = global.fetch.mock.calls[0]
@@ -93,8 +94,52 @@ describe('api.js', () => {
       // Attach the rejection handler BEFORE advancing timers — otherwise the
       // promise rejects with nothing listening and Node reports it unhandled.
       const settled = expect(call()).rejects.toMatchObject({ status: 0 })
-      await vi.advanceTimersByTimeAsync(12_000)
+      await vi.advanceTimersByTimeAsync(abortAfterMs)
       await settled
+    })
+  })
+
+  describe('refund', () => {
+    it('outlasts admin-api\'s 60s wait for billing instead of aborting at 12s', async () => {
+      vi.useFakeTimers()
+      let aborted = false
+      global.fetch.mockImplementation(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init.signal.addEventListener('abort', () => {
+              aborted = true
+              const err = new Error('aborted')
+              err.name = 'AbortError'
+              reject(err)
+            })
+          }),
+      )
+      const settled = expect(api.refund('u1', 'pay1', 500, 'admin refund', 'tok-abc'))
+        .rejects.toMatchObject({ status: 0 })
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(5_000)
+      await settled
+      expect(aborted).toBe(true)
+    })
+  })
+
+  describe('markRefundPaidByHand', () => {
+    it('posts the owner, Stripe refund id and note to the request route', async () => {
+      await api.markRefundPaidByHand('req-1', 'org-1', 're_123', 'paid in Stripe', 'tok-abc')
+      const [url, init] = global.fetch.mock.calls[0]
+      expect(url).toBe('/api/v1/admin/refund-requests/req-1/mark-paid-by-hand')
+      expect(init.method).toBe('POST')
+      expect(JSON.parse(init.body)).toEqual({
+        ownerId: 'org-1', providerRefundId: 're_123', note: 'paid in Stripe',
+      })
+    })
+
+    it('surfaces billing\'s refusal message verbatim', async () => {
+      const copy = "Stripe hasn't told us about this refund yet — try again in a minute."
+      global.fetch.mockResolvedValue(errorResponse(409, { code: 'refund_not_seen', message: copy }))
+      await expect(api.markRefundPaidByHand('req-1', 'o1', 're_1', null, 'tok-abc'))
+        .rejects.toMatchObject({ status: 409, message: copy })
     })
   })
 

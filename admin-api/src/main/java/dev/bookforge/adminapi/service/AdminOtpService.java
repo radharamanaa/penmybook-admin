@@ -42,6 +42,7 @@ public class AdminOtpService {
     private static final String ACTION_WALLET_TOP_UP = "wallet_top_up";
     private static final String ACTION_UNSUSPEND = "unsuspend";
     private static final String ACTION_WALLET_UNFREEZE = "wallet_unfreeze";
+    private static final String ACTION_REFUND_MARK_PAID = "refund_mark_paid";
     private static final String OTP_ACTION_ADMIN_WRITE = "ADMIN_WRITE";
     private static final String OTP_ACTION_REFUND = "REFUND";
     private static final String OTP_ACTION_RESOLVE_REFUND_REQUEST = "RESOLVE_REFUND_REQUEST";
@@ -115,7 +116,9 @@ public class AdminOtpService {
             case ACTION_GRANT_CREDIT, ACTION_WALLET_TOP_UP, ACTION_UNSUSPEND, ACTION_WALLET_UNFREEZE ->
                     OTP_ACTION_ADMIN_WRITE;
             case ACTION_REFUND -> OTP_ACTION_REFUND;
-            case ACTION_RESOLVE_REFUND_REQUEST -> OTP_ACTION_RESOLVE_REFUND_REQUEST;
+            // Marking a request paid by hand settles it like a resolve does: same OTP action, so
+            // entitlements' otp_challenges CHECK needs no new value.
+            case ACTION_RESOLVE_REFUND_REQUEST, ACTION_REFUND_MARK_PAID -> OTP_ACTION_RESOLVE_REFUND_REQUEST;
             default -> throw new IllegalArgumentException("unsupported admin step-up action: " + action);
         };
     }

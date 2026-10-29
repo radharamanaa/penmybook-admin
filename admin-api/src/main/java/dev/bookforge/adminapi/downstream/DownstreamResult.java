@@ -18,18 +18,24 @@ public record DownstreamResult(
         String accountStatus,    // present on suspend/unsuspend; null otherwise
         long requestedCents,     // refund only — the clamped ask
         long walletDebitedCents, // refund only — what was actually debited back out of the wallet
-        boolean idempotentReplay // refund only — true when the paymentId was already refunded
+        boolean idempotentReplay, // refund only — true when the paymentId was already refunded
+        boolean outcomeUnknown   // refund only — billing did not answer in time; money may have moved
 ) {
 
     /** Convenience constructor for the non-refund writes (no refund figures). */
     public DownstreamResult(boolean success, UUID auditEntryId, String accountStatus) {
-        this(success, auditEntryId, accountStatus, 0L, 0L, false);
+        this(success, auditEntryId, accountStatus, 0L, 0L, false, false);
     }
 
     /** Factory for the billing refund result, carrying the requested + actually-debited figures. */
     public static DownstreamResult refund(boolean success, UUID auditEntryId, long requestedCents,
                                           long walletDebitedCents, boolean idempotentReplay) {
         return new DownstreamResult(success, auditEntryId, null, requestedCents,
-                walletDebitedCents, idempotentReplay);
+                walletDebitedCents, idempotentReplay, false);
+    }
+
+    /** The refund call timed out: billing may have refunded the card, so it is not a failure to retry. */
+    public static DownstreamResult refundOutcomeUnknown() {
+        return new DownstreamResult(false, null, null, 0L, 0L, false, true);
     }
 }

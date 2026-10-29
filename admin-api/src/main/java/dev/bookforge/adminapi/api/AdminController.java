@@ -3,6 +3,7 @@ package dev.bookforge.adminapi.api;
 import dev.bookforge.adminapi.downstream.DownstreamClient;
 import dev.bookforge.adminapi.downstream.DownstreamResult;
 import dev.bookforge.adminapi.dto.ResolveRefundRequestBody;
+import dev.bookforge.adminapi.dto.MarkPaidByHandBody;
 import dev.bookforge.adminapi.dto.PreAdmitEntryView;
 import dev.bookforge.adminapi.dto.PreAdmitView;
 import dev.bookforge.adminapi.dto.WaitlistAdmitView;
@@ -92,9 +93,12 @@ public class AdminController {
     // ───────── Audit action labels (LOCKED — match V00X__create_audit_log.sql action enum) ─────────
     private static final String ACTION_WALLET_TOPUP = "WALLET_TOPUP";
     private static final String ACTION_REFUND = "REFUND";
+    /** A refund call billing answered from an earlier receipt — no money moved this time. */
+    private static final String ACTION_REFUND_REPLAY = "REFUND_REPLAY";
     /** audit_log.action is plain TEXT — a new action needs no migration. */
     private static final String ACTION_REFUND_REQUEST_RESOLVE = "REFUND_REQUEST_RESOLVE";
     private static final String ACTION_FORCE_RESOLVE_REVERSED = "FORCE_RESOLVE_REVERSED";
+    private static final String ACTION_REFUND_MARK_PAID = "REFUND_MARK_PAID_BY_HAND";
     private static final String ACTION_GRANT_CREDITS = "GRANT_CREDITS";
     private static final String ACTION_SET_PLATFORM_ADMIN = "SET_PLATFORM_ADMIN";
     private static final String ACTION_UPSERT_ORG_PRICING = "UPSERT_ORG_PRICING";
@@ -127,17 +131,22 @@ public class AdminController {
     private static final String STEP_UP_ACTION_UNSUSPEND = "unsuspend";
     /** Lift a wallet freeze. Hash is {ownerType, ownerId}; billing verifies and spends it. */
     private static final String STEP_UP_ACTION_WALLET_UNFREEZE = "wallet_unfreeze";
+    /** Settle an approved request paid out by hand in Stripe. Hash {requestId, providerRefundId}. */
+    private static final String STEP_UP_ACTION_REFUND_MARK_PAID = "refund_mark_paid";
     private static final String OWNER_TYPE_USER = "USER";
     private static final String OWNER_TYPE_ORG = "ORG";
     /** Header carrying the single-use, action-bound step-up token (spec 05 §3). */
     private static final String STEP_UP_TOKEN_HEADER = "X-Step-Up-Token";
     private static final String REJECT_STEP_UP_REQUIRED = "step_up_required";
+    /** Shown to staff when a payout timed out: retrying with a fresh OTP would refund twice. */
+    static final String REFUND_OUTCOME_UNKNOWN_MESSAGE =
+            "The refund may have gone through — check the payment before retrying.";
 
     /** Valid admin step-up actions an OTP challenge may be started for. */
     private static final Set<String> STEP_UP_ACTIONS =
             Set.of(STEP_UP_ACTION_GRANT_CREDIT, STEP_UP_ACTION_REFUND, STEP_UP_ACTION_WALLET_TOP_UP,
                    STEP_UP_ACTION_RESOLVE_REFUND_REQUEST, STEP_UP_ACTION_UNSUSPEND,
-                   STEP_UP_ACTION_WALLET_UNFREEZE);
+                   STEP_UP_ACTION_WALLET_UNFREEZE, STEP_UP_ACTION_REFUND_MARK_PAID);
 
     private static final Set<String> REFUND_QUEUE_STATUSES = Set.of(
             "PENDING", "APPROVED", "REJECTED", "WITHDRAWN", "PAYING", "SETTLED");
@@ -359,6 +368,73 @@ public class AdminController {
     }
 
     /**
+     * Settle an APPROVED refund request that staff paid out by hand in the Stripe Dashboard (an org
+     * request has no payout path). Billing checks the Stripe refund id is one its webhook already
+     * recorded for a payment of the request's owner, used by no other request, and settles it.
+     *
+     * <p>Step-up gated ({@code refund_mark_paid}); the hash binds {requestId, providerRefundId} with
+     * the request's owner as the target, and billing spends the token. Billing's refusals (the
+     * webhook has not landed, the refund id is already used, a note is needed because Stripe
+     * refunded less than approved) are returned with billing's status and message verbatim.
+     */
+    @PostMapping("/refund-requests/{requestId}/mark-paid-by-hand")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<Object> markRefundPaidByHand(
+            @PathVariable UUID requestId,
+            @Valid @RequestBody MarkPaidByHandBody body,
+            @RequestHeader(value = STEP_UP_TOKEN_HEADER, required = false) String stepUpToken,
+            @AuthenticationPrincipal Jwt jwt,
+            HttpServletRequest request) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("requestId", requestId.toString());
+        params.put("providerRefundId", body.providerRefundId().trim());
+        String note = body.note() == null || body.note().isBlank() ? null : body.note().trim();
+
+        AdminCommand command = new AdminCommand(actorOf(jwt), body.ownerId(),
+                STEP_UP_ACTION_REFUND_MARK_PAID, stepUpToken, params);
+        AdminService.MarkPaidByHandOutcome outcome = adminService.markRefundPaidByHand(command, note);
+        if (!outcome.success()) {
+            Map<String, Object> denied = new LinkedHashMap<>(params);
+            denied.put("note", note);
+            auditEventWriter.writeDeny(actorOf(jwt), ACTION_REFUND_MARK_PAID,
+                    RESOURCE_REFUND_REQUEST, requestId.toString(), denied, clientIp(request));
+            if (outcome.rejectionReason() != null) {
+                return stepUpRejectionResponse(outcome.rejectionReason(),
+                        STEP_UP_ACTION_REFUND_MARK_PAID, params);
+            }
+            if (outcome.refusedStatus() > 0) {
+                Map<String, Object> refused = new LinkedHashMap<>();
+                refused.put("error", "refund_mark_paid_refused");
+                refused.put("code", outcome.refusedCode() == null
+                        ? "REFUND_MARK_PAID_REFUSED" : outcome.refusedCode());
+                refused.put("message", outcome.refusedMessage() == null
+                        ? "Billing refused to mark this request paid." : outcome.refusedMessage());
+                return ResponseEntity.status(outcome.refusedStatus()).body(refused);
+            }
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of(
+                    "error", "downstream_unconfirmed",
+                    "code", "DOWNSTREAM_UNCONFIRMED",
+                    "message", "Billing did not confirm. Refresh and check the status."));
+        }
+
+        Map<String, Object> newValue = new LinkedHashMap<>();
+        newValue.put("requestId", requestId.toString());
+        newValue.put("ownerId", body.ownerId().toString());
+        newValue.put("providerRefundId", params.get("providerRefundId"));
+        newValue.put("note", note);
+        if (outcome.request() != null) {
+            newValue.put("status", outcome.request().status());
+            newValue.put("refundedCents", outcome.request().refundedCents());
+        }
+        auditEventWriter.writeAllow(actorOf(jwt), ACTION_REFUND_MARK_PAID,
+                RESOURCE_REFUND_REQUEST, requestId.toString(), null, newValue, clientIp(request));
+        Map<String, Object> bodyOut = new LinkedHashMap<>();
+        bodyOut.put("markedPaid", true);
+        bodyOut.put("request", outcome.request());
+        return ResponseEntity.ok(bodyOut);
+    }
+
+    /**
      * Payments a refund or dispute could not fully take back from the wallet, because the money
      * was already spent. A READ: no step-up, no audit row. Envelope, never a bare list, so a
      * billing outage cannot look like nothing is unrecovered.
@@ -393,6 +469,13 @@ public class AdminController {
                 STEP_UP_ACTION_REFUND, stepUpToken, params);
         AdminService.RefundOutcome outcome = adminService.refund(command);
         if (!outcome.success()) {
+            if (AdminService.REFUND_OUTCOME_UNKNOWN.equals(outcome.rejectionReason())) {
+                // The card refund may have landed: leave a trace staff can match to Stripe.
+                Map<String, Object> attempted = new LinkedHashMap<>(params);
+                attempted.put("reason", "outcome_unknown");
+                auditEventWriter.writeDeny(actorOf(jwt), ACTION_REFUND, RESOURCE_PAYMENT,
+                        body.paymentId().toString(), attempted, clientIp(request));
+            }
             return refundRejection(outcome, params);
         }
 
@@ -405,7 +488,9 @@ public class AdminController {
         if (body.refundRequestId() != null) {
             newValue.put("refundRequestId", body.refundRequestId().toString());
         }
-        auditEventWriter.writeAllow(actorOf(jwt), ACTION_REFUND, RESOURCE_PAYMENT,
+        // A replay moved no money; record it as one so it never reads as a second refund.
+        auditEventWriter.writeAllow(actorOf(jwt),
+                outcome.idempotentReplay() ? ACTION_REFUND_REPLAY : ACTION_REFUND, RESOURCE_PAYMENT,
                 body.paymentId().toString(), null, newValue, clientIp(request));
         return ResponseEntity.ok(new RefundReceiptView(body.paymentId(),
                 outcome.requestedCents(), outcome.walletDebitedCents(),
@@ -455,6 +540,12 @@ public class AdminController {
      */
     private ResponseEntity<Object> refundRejection(AdminService.RefundOutcome outcome,
                                                    Map<String, Object> params) {
+        if (AdminService.REFUND_OUTCOME_UNKNOWN.equals(outcome.rejectionReason())) {
+            return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body(Map.of(
+                    "error", AdminService.REFUND_OUTCOME_UNKNOWN,
+                    "code", "REFUND_OUTCOME_UNKNOWN",
+                    "message", REFUND_OUTCOME_UNKNOWN_MESSAGE));
+        }
         return stepUpRejectionResponse(outcome.rejectionReason(), STEP_UP_ACTION_REFUND, params);
     }
 

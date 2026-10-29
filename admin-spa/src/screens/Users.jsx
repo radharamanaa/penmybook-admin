@@ -13,6 +13,15 @@ import OrgHold from './OrgHold.jsx'
  * When an APPROVED request id is present it is bound into the OTP and forwarded to billing.
  * Restore after Stripe reversed uses the same {@code refund} OTP action with {@code forceResolve}.
  */
+// A payout that timed out may still have refunded the card; a fresh OTP would refund it twice.
+const REFUND_OUTCOME_UNKNOWN_COPY =
+  'The refund may have gone through — check the payment before retrying.'
+
+function refundOutcomeUnknown(otp, err) {
+  const isPayout = otp?.action === 'refund' && !otp.params?.forceResolve
+  return isPayout && (err.body?.code === 'REFUND_OUTCOME_UNKNOWN' || err.status === 0)
+}
+
 export default function Users() {
   const [searchParams] = useSearchParams()
   const linkedRequestId = searchParams.get('refundRequestId') || ''
@@ -282,7 +291,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
       }
       setOtp(null)
     } catch (err) {
-      onError(err.message)
+      onError(refundOutcomeUnknown(otp, err) ? REFUND_OUTCOME_UNKNOWN_COPY : err.message)
       // A refused or timed-out lift may still have changed the hold (billing unfroze, then the
       // reply was lost): re-read it so the panel never offers a lift that is already done.
       if (otp.action === 'unsuspend' || otp.action === 'wallet_unfreeze') await loadHoldState()

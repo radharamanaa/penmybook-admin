@@ -5,10 +5,16 @@ import { MemoryRouter } from 'react-router-dom'
 
 const refundRequestQueue = vi.hoisted(() => vi.fn())
 const unrecoveredPayments = vi.hoisted(() => vi.fn())
+const otpStart = vi.hoisted(() => vi.fn())
+const otpVerify = vi.hoisted(() => vi.fn())
+const markRefundPaidByHand = vi.hoisted(() => vi.fn())
 vi.mock('../api.js', () => ({
   api: {
     refundRequestQueue: (...a) => refundRequestQueue(...a),
     unrecoveredPayments: (...a) => unrecoveredPayments(...a),
+    otpStart: (...a) => otpStart(...a),
+    otpVerify: (...a) => otpVerify(...a),
+    markRefundPaidByHand: (...a) => markRefundPaidByHand(...a),
   },
 }))
 
@@ -161,7 +167,7 @@ describe('RefundRequests approved rows (U1, U4, P1, G2)', () => {
     expect(screen.getByText(/past the 120-day card-refund limit/i)).toBeInTheDocument()
   })
 
-  it('keeps a plain pay-out link when every payment is past the 120-day limit', async () => {
+  it('names the out-of-window payment when every payment is past the 120-day limit (R2)', async () => {
     refundRequestQueue.mockResolvedValue({
       degraded: false,
       requests: [{
@@ -173,15 +179,91 @@ describe('RefundRequests approved rows (U1, U4, P1, G2)', () => {
       }],
     })
     renderQueue()
-    const link = await screen.findByRole('link', { name: /^pay out$/i })
+    const link = await screen.findByRole('link', { name: /^pay out from …000c$/i })
     expect(link.getAttribute('href')).toContain('refundRequestId=r3')
-    expect(link.getAttribute('href')).not.toContain('paymentId=')
+    // The Users payout form needs a payment id; without it the unpayable close was unreachable.
+    expect(link.getAttribute('href')).toContain(`paymentId=${PAY_OLD}`)
+    expect(link.getAttribute('href')).toContain('amountCents=1000')
   })
 
   it('tells staff a blank approval approves what the user asked', async () => {
     refundRequestQueue.mockResolvedValue({ requests: [], degraded: false })
     renderQueue()
     expect(await screen.findByText(/leave blank for the amount the user asked/i)).toBeInTheDocument()
+  })
+})
+
+// Org refund requests have no payout path: staff refund in the Stripe Dashboard, then mark the
+// request paid by hand (owner, 29 Oct 2026).
+describe('RefundRequests pay out by hand (R3)', () => {
+  const NOW = new Date().toISOString()
+  const ORG = 'org-1'
+  const PAY = 'dddddddd-0000-0000-0000-00000000000d'
+  const orgRow = {
+    id: 'r-org', ownerType: 'ORG', ownerId: ORG, status: 'APPROVED',
+    requestedAmountCents: 2500, snapshotRefundableCents: 2500, liveRefundableCents: 2500,
+    approvedAmountCents: 2500, refundedCents: null, reason: 'org', createdAt: NOW,
+    suggestedPaymentId: PAY,
+    payments: [{ paymentId: PAY, remainingCents: 2500, inWindow: true, createdAt: NOW }],
+  }
+
+  beforeEach(() => {
+    unrecoveredPayments.mockResolvedValue({ payments: [], degraded: false })
+    refundRequestQueue.mockResolvedValue({ degraded: false, requests: [orgRow] })
+    otpStart.mockReset()
+    otpVerify.mockReset()
+    markRefundPaidByHand.mockReset()
+    otpStart.mockResolvedValue({ challengeId: 'ch-1' })
+    otpVerify.mockResolvedValue({ verified: true, stepUpToken: 'tok-abc' })
+  })
+
+  it('shows an org request as pay-out-by-hand with its payments and approved amount', async () => {
+    renderQueue()
+    expect(await screen.findByText('Org wallet — pay out by hand in Stripe')).toBeInTheDocument()
+    expect(screen.getByText(/Approved \$25\.00/)).toBeInTheDocument()
+    expect(screen.getByText(new RegExp(PAY))).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /pay out/i })).toBeNull()
+  })
+
+  it('marks a request paid by hand behind an OTP bound to the owner and refund id', async () => {
+    markRefundPaidByHand.mockResolvedValue({ markedPaid: true })
+    renderQueue()
+    await userEvent.click(await screen.findByRole('button', { name: /mark paid by hand/i }))
+    await userEvent.type(screen.getByLabelText(/stripe refund id/i), 're_123')
+    await userEvent.type(screen.getByLabelText(/^note$/i), 'refunded in Stripe')
+    await userEvent.click(screen.getByRole('button', { name: /start otp/i }))
+    const params = { requestId: 'r-org', providerRefundId: 're_123' }
+    expect(otpStart).toHaveBeenCalledWith('refund_mark_paid', ORG, params)
+
+    await userEvent.type(screen.getByLabelText(/otp code/i), '123456')
+    await userEvent.click(screen.getByRole('button', { name: /verify & mark paid/i }))
+    expect(otpVerify).toHaveBeenCalledWith('ch-1', '123456', 'refund_mark_paid', ORG, params)
+    expect(markRefundPaidByHand).toHaveBeenCalledWith(
+      'r-org', ORG, 're_123', 'refunded in Stripe', 'tok-abc')
+    expect(await screen.findByText(/marked paid by hand/i)).toBeInTheDocument()
+  })
+
+  it('shows billing\'s refusal verbatim', async () => {
+    const copy = "Stripe hasn't told us about this refund yet — try again in a minute."
+    markRefundPaidByHand.mockRejectedValue(Object.assign(new Error(copy), { status: 409 }))
+    renderQueue()
+    await userEvent.click(await screen.findByRole('button', { name: /mark paid by hand/i }))
+    await userEvent.type(screen.getByLabelText(/stripe refund id/i), 're_123')
+    await userEvent.click(screen.getByRole('button', { name: /start otp/i }))
+    await userEvent.type(screen.getByLabelText(/otp code/i), '123456')
+    await userEvent.click(screen.getByRole('button', { name: /verify & mark paid/i }))
+    expect(await screen.findByText(copy)).toBeInTheDocument()
+  })
+
+  it('offers mark paid by hand on a user request too, beside the payout links', async () => {
+    refundRequestQueue.mockResolvedValue({
+      degraded: false,
+      requests: [{ ...orgRow, id: 'r-user', ownerType: 'USER', ownerId: 'u1' }],
+    })
+    renderQueue()
+    expect(await screen.findByRole('button', { name: /mark paid by hand/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /pay out \$25\.00/i })).toBeInTheDocument()
+    expect(screen.queryByText('Org wallet — pay out by hand in Stripe')).toBeNull()
   })
 })
 

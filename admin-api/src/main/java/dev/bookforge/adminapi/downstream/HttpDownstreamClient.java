@@ -76,6 +76,11 @@ public class HttpDownstreamClient implements DownstreamClient {
      * DENY, the operator retries via POST /users/{id}/refund).
      */
     static final Duration REFUND_RESOLVE_TIMEOUT = Duration.ofSeconds(30);
+    /**
+     * A staff payout calls Stripe inline. At 5s the card refund landed while staff saw a failure,
+     * and a fresh OTP was a new key — a second refund (A1). nginx in front allows 75s.
+     */
+    static final Duration REFUND_PAYOUT_TIMEOUT = Duration.ofSeconds(60);
     /** Per-book charges batch: tight budget; fail-soft on timeout so Analytics stays up. */
     private static final Duration BY_BOOKS_RPC_TIMEOUT = Duration.ofSeconds(2);
     /**
@@ -94,14 +99,23 @@ public class HttpDownstreamClient implements DownstreamClient {
     private final ServiceAccountTokenFactory tokenFactory;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
+    private final Duration refundPayoutTimeout;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public HttpDownstreamClient(DownstreamProperties downstream,
                                 ServiceAccountTokenFactory tokenFactory,
                                 ObjectMapper objectMapper) {
+        this(downstream, tokenFactory, objectMapper, REFUND_PAYOUT_TIMEOUT);
+    }
+
+    /** Tests shorten the payout budget so a timeout can be provoked without waiting a minute. */
+    HttpDownstreamClient(DownstreamProperties downstream, ServiceAccountTokenFactory tokenFactory,
+                         ObjectMapper objectMapper, Duration refundPayoutTimeout) {
         this.downstream = downstream;
         this.tokenFactory = tokenFactory;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder().connectTimeout(ADMIN_RPC_TIMEOUT).build();
+        this.refundPayoutTimeout = refundPayoutTimeout;
     }
 
     // ───────── Phase 3a step-up-gated writes ─────────
@@ -245,32 +259,37 @@ public class HttpDownstreamClient implements DownstreamClient {
             JsonNode json = get(url, BILLING_AUD, ADMIN_RPC_TIMEOUT);
             List<RefundRequestQueueEntry> rows = new ArrayList<>();
             for (JsonNode n : json) {
-                rows.add(new RefundRequestQueueEntry(
-                        UUID.fromString(n.path("id").asText()),
-                        n.path("ownerType").asText(),
-                        UUID.fromString(n.path("ownerId").asText()),
-                        n.path("status").asText(),
-                        n.hasNonNull("requestedAmountCents")
-                                ? n.path("requestedAmountCents").asLong() : null,
-                        n.path("reason").asText(""),
-                        n.path("snapshotRefundableCents").asLong(0L),
-                        n.path("liveRefundableCents").asLong(0L),
-                        n.hasNonNull("approvedAmountCents")
-                                ? n.path("approvedAmountCents").asLong() : null,
-                        n.hasNonNull("refundedCents") ? n.path("refundedCents").asLong() : null,
-                        n.path("resolutionNote").asText(null),
-                        parseInstant(n.path("createdAt").asText(null)),
-                        parseInstant(n.path("updatedAt").asText(null)),
-                        null,
-                        null,
-                        refundRequestPayments(n.path("payments")),
-                        optionalUuid(n, "suggestedPaymentId")));
+                rows.add(refundRequestRow(n));
             }
             return enrichIdentities(new RefundRequestQueueView(false, false, status, rows));
         } catch (DownstreamCallException e) {
             log.warn("refund-request queue unavailable: {}", e.getMessage());
             return new RefundRequestQueueView(true, false, status, List.of());
         }
+    }
+
+    /** One staff refund-request row as billing serialises it; identity names are filled later. */
+    private RefundRequestQueueEntry refundRequestRow(JsonNode n) {
+        return new RefundRequestQueueEntry(
+                UUID.fromString(n.path("id").asText()),
+                n.path("ownerType").asText(),
+                UUID.fromString(n.path("ownerId").asText()),
+                n.path("status").asText(),
+                n.hasNonNull("requestedAmountCents")
+                        ? n.path("requestedAmountCents").asLong() : null,
+                n.path("reason").asText(""),
+                n.path("snapshotRefundableCents").asLong(0L),
+                n.path("liveRefundableCents").asLong(0L),
+                n.hasNonNull("approvedAmountCents")
+                        ? n.path("approvedAmountCents").asLong() : null,
+                n.hasNonNull("refundedCents") ? n.path("refundedCents").asLong() : null,
+                n.path("resolutionNote").asText(null),
+                parseInstant(n.path("createdAt").asText(null)),
+                parseInstant(n.path("updatedAt").asText(null)),
+                null,
+                null,
+                refundRequestPayments(n.path("payments")),
+                optionalUuid(n, "suggestedPaymentId"));
     }
 
     /** Billing's {@code payments} array on a staff refund-request row; missing or malformed → empty. */
@@ -514,12 +533,14 @@ public class HttpDownstreamClient implements DownstreamClient {
         }
         try {
             JsonNode json = send(downstream.billingUrl() + "/internal/refund", BILLING_AUD,
-                    toJson(body), ADMIN_RPC_TIMEOUT);
+                    toJson(body), refundPayoutTimeout);
             boolean success = json.path("success").asBoolean(false);
             UUID auditEntryId = success ? optionalUuid(json, "auditEntryId") : null;
             long requestedCents = json.path("requestedCents").asLong(0L);
             long walletDebitedCents = json.path("walletDebitedCents").asLong(0L);
-            boolean idempotentReplay = json.path("idempotentReplay").asBoolean(false);
+            // Billing's RefundResult names it "replayed"; "idempotentReplay" is the older name.
+            boolean idempotentReplay = json.path("replayed").asBoolean(false)
+                    || json.path("idempotentReplay").asBoolean(false);
             return DownstreamResult.refund(success, auditEntryId, requestedCents,
                     walletDebitedCents, idempotentReplay);
         } catch (DownstreamConflictException conflict) {
@@ -531,6 +552,13 @@ public class HttpDownstreamClient implements DownstreamClient {
                     + "awaiting card credit — retry after it settles", command.params().get("paymentId"));
             return new DownstreamResult(false, null, null);
         } catch (DownstreamCallException e) {
+            if (e.timedOut()) {
+                // Billing may have refunded the card after we stopped waiting. Saying "rejected" sends
+                // staff to a fresh OTP = a new idempotency key = a second refund.
+                log.error("REFUND_OUTCOME_UNKNOWN payment={} — billing did not answer within {}",
+                        command.params().get("paymentId"), refundPayoutTimeout);
+                return DownstreamResult.refundOutcomeUnknown();
+            }
             return new DownstreamResult(false, null, null);
         }
     }
@@ -596,6 +624,46 @@ public class HttpDownstreamClient implements DownstreamClient {
     public WalletUnfreezeCallResult unfreezeWalletFallback(AdminCommand command, String note, Throwable t) {
         log.warn("unfreezeWallet short-circuited: {}", t.toString());
         return WalletUnfreezeCallResult.failed();
+    }
+
+    /**
+     * Billing verifies AND spends the {@code refund_mark_paid} token (bound over {@code {requestId,
+     * providerRefundId}} with the request's owner as the target) and settles the request against a
+     * refund staff made in the Stripe Dashboard. Billing's 4xx detail reaches staff verbatim.
+     */
+    @Override
+    @CircuitBreaker(name = CB_BILLING, fallbackMethod = "markRefundPaidByHandFallback")
+    public MarkPaidByHandCallResult markRefundPaidByHand(AdminCommand command, String note) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("staffUserId", command.staffUserId().toString());
+        body.put("providerRefundId", command.params().get("providerRefundId"));
+        body.put("note", note);
+        body.put("stepUpToken", command.stepUpToken());
+        String url = downstream.billingUrl() + "/internal/admin/refund-requests/"
+                + command.params().get("requestId") + "/mark-paid-by-hand";
+        JsonNode json;
+        try {
+            json = send(url, BILLING_AUD, toJson(body), ADMIN_RPC_TIMEOUT);
+        } catch (DownstreamCallException e) {
+            if (e.status() >= 400 && e.status() < 500) {
+                return MarkPaidByHandCallResult.refused(e.status(), e.code(), e.detail());
+            }
+            return MarkPaidByHandCallResult.failed();
+        }
+        try {
+            return MarkPaidByHandCallResult.ok(refundRequestRow(json));
+        } catch (IllegalArgumentException unreadable) {
+            // Billing settled the request; only its echo is unreadable. Never report a done
+            // settlement as failed — staff would mark it again.
+            log.warn("mark-paid-by-hand: settled, but the returned request is unreadable");
+            return MarkPaidByHandCallResult.ok(null);
+        }
+    }
+
+    public MarkPaidByHandCallResult markRefundPaidByHandFallback(AdminCommand command, String note,
+                                                                 Throwable t) {
+        log.warn("markRefundPaidByHand short-circuited: {}", t.toString());
+        return MarkPaidByHandCallResult.failed();
     }
 
     public ForceResolveReversedCallResult forceResolveReversedFallback(AdminCommand command, Throwable t) {
@@ -665,7 +733,8 @@ public class HttpDownstreamClient implements DownstreamClient {
 
     @Override
     @CircuitBreaker(name = CB_BILLING)
-    public WalletBalanceView walletTopUp(UUID userId, long amountCents, String reason) {
+    public WalletBalanceView walletTopUp(UUID userId, long amountCents, String reason,
+                                         String stepUpToken) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("ownerType", "USER");
         body.put("ownerId", userId.toString());
@@ -678,6 +747,15 @@ public class HttpDownstreamClient implements DownstreamClient {
         // The ledger reason for an admin top-up is ALWAYS ADMIN_CREDIT; the free text lives in
         // the audit log, not the money ledger.
         body.put("reason", "ADMIN_CREDIT");
+        // One OTP challenge = one top-up. The token store is in memory, so after an admin-api
+        // restart a token could be replayed within its life; billing's dedupe on this key stops a
+        // second credit (A3).
+        String challengeId = challengeIdOf(stepUpToken);
+        if (challengeId == null || challengeId.isBlank()) {
+            // Never "admin-topup:null": every token-less top-up would share one dedupe key.
+            throw new IllegalStateException("wallet top-up needs a step-up token");
+        }
+        body.put("idempotencyKey", "admin-topup:" + challengeId);
         String url = downstream.billingUrl() + "/internal/wallet/credit";
         JsonNode json = send(url, BILLING_AUD, toJson(body), ADMIN_RPC_TIMEOUT);
         long balance = json.path("balanceCents").asLong(0L);
@@ -1054,11 +1132,15 @@ public class HttpDownstreamClient implements DownstreamClient {
             if (response.statusCode() == 409) {
                 // Business-state conflict (e.g. billing: a refund already awaiting card credit), not
                 // an outage — distinct type so the refund path can report it as "in progress".
-                throw new DownstreamConflictException("Downstream " + request.uri() + " returned HTTP 409");
+                JsonNode problem = problemOf(response.body());
+                throw new DownstreamConflictException("Downstream " + request.uri() + " returned HTTP 409",
+                        textOrNull(problem, "detail"), textOrNull(problem, "code"));
             }
             if (response.statusCode() >= 400) {
+                JsonNode problem = problemOf(response.body());
                 throw new DownstreamCallException("Downstream " + request.uri() + " returned HTTP "
-                        + response.statusCode(), null);
+                        + response.statusCode(), null, response.statusCode(),
+                        textOrNull(problem, "detail"), textOrNull(problem, "code"));
             }
             String body = response.body();
             if (body == null || body.isBlank()) {
@@ -1069,6 +1151,18 @@ public class HttpDownstreamClient implements DownstreamClient {
             throw e;
         } catch (Exception e) {
             throw new DownstreamCallException("Downstream call failed: " + request.uri(), e);
+        }
+    }
+
+    /** The callee's RFC 7807 problem body; an empty object when the body is absent or not JSON. */
+    private JsonNode problemOf(String body) {
+        if (body == null || body.isBlank()) {
+            return objectMapper.createObjectNode();
+        }
+        try {
+            return objectMapper.readTree(body);
+        } catch (Exception notJson) {
+            return objectMapper.createObjectNode();
         }
     }
 
