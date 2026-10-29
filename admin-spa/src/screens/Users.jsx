@@ -3,6 +3,10 @@ import { useSearchParams } from 'react-router-dom'
 import { api } from '../api.js'
 import { useScrollIntoViewOnPhone } from '../useScrollIntoViewOnPhone.js'
 import OrgHold from './OrgHold.jsx'
+import {
+  REFUND_REASON, RefundRetryPanel, classifyRefundFailure, pendingRefundRetry,
+  refundSuccessCopy, retryStillUsable, useNow,
+} from './RefundRetry.jsx'
 
 /**
  * User search + money ops. Grant/refund/restore-reversed are OTP step-up gated (D6): start a
@@ -13,15 +17,6 @@ import OrgHold from './OrgHold.jsx'
  * When an APPROVED request id is present it is bound into the OTP and forwarded to billing.
  * Restore after Stripe reversed uses the same {@code refund} OTP action with {@code forceResolve}.
  */
-// A payout that timed out may still have refunded the card; a fresh OTP would refund it twice.
-const REFUND_OUTCOME_UNKNOWN_COPY =
-  'The refund may have gone through — check the payment before retrying.'
-
-function refundOutcomeUnknown(otp, err) {
-  const isPayout = otp?.action === 'refund' && !otp.params?.forceResolve
-  return isPayout && (err.body?.code === 'REFUND_OUTCOME_UNKNOWN' || err.status === 0)
-}
-
 export default function Users() {
   const [searchParams] = useSearchParams()
   const linkedRequestId = searchParams.get('refundRequestId') || ''
@@ -270,6 +265,18 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
   const [resetStrikes, setResetStrikes] = useState(false)
   // Billing could not say whether the wallet is frozen: staff confirm before a reactivation.
   const [confirmWalletUnknown, setConfirmWalletUnknown] = useState(false)
+  // A payout whose outcome is not known: the exact request + token, offered again as-is.
+  const [pendingRetry, setPendingRetry] = useState(null)
+  const [retrying, setRetrying] = useState(false)
+  // A payout request is on the wire: no second refund may start from this screen meanwhile.
+  const [payoutInFlight, setPayoutInFlight] = useState(false)
+  // Refs, not state: a second click in the same tick must see the first one already running.
+  const retryInFlight = useRef(false)
+  const executeInFlight = useRef(false)
+  const now = useNow(retryStillUsable(pendingRetry, Date.now()))
+  const retryOffered = retryStillUsable(pendingRetry, now)
+  // While a payout may still be landing, a second OTP would be a new key = a second refund.
+  const refundLocked = retryOffered || payoutInFlight || retrying
 
   // Depends on the user only: the parent's onDone/onError are new functions on every render, so
   // reporting through them here would refetch on every parent render.
@@ -287,6 +294,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
 
   // `flags` ride in the request body, never in `params` (the OTP hash).
   async function startOtp(action, params, note = null, flags = null) {
+    if (action === 'refund' && !params.forceResolve) setPendingRetry(null)
     try {
       const resp = await api.otpStart(action, user.userId, params)
       setOtp({ action, challengeId: resp.challengeId, params, note, flags })
@@ -294,10 +302,91 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
     } catch (err) { onError(err.message) }
   }
 
+  async function sendRefund(request, retryOfUnknownOutcome = false) {
+    return api.refund(request.userId, request.paymentId, request.amountCents, request.reason,
+      request.stepUpToken, request.refundRequestId, retryOfUnknownOutcome)
+  }
+
+  // A payout that may or may not have landed keeps its exact request + token on offer.
+  async function payOut(stepUpToken, verifiedAtMs) {
+    const request = {
+      userId: user.userId,
+      paymentId: otp.params.paymentId,
+      amountCents: otp.params.refundAmountCents,
+      reason: REFUND_REASON,
+      stepUpToken,
+      refundRequestId: otp.params.refundRequestId,
+    }
+    setOtp(null)
+    setPayoutInFlight(true)
+    try {
+      onDone(refundSuccessCopy(await sendRefund(request), request))
+    } catch (err) {
+      const failure = classifyRefundFailure(err, { isRetry: false, priorMayHaveLanded: false })
+      if (failure.retryable) {
+        setPendingRetry(pendingRefundRetry(request, verifiedAtMs, failure))
+      } else if (failure.holdUntilExpiry) {
+        setPendingRetry({ ...pendingRefundRetry(request, verifiedAtMs, failure), blocked: true })
+      } else {
+        onError(failure.message)
+      }
+    } finally {
+      setPayoutInFlight(false)
+    }
+  }
+
+  async function retryRefund() {
+    if (retryInFlight.current || !pendingRetry) return
+    if (!retryStillUsable(pendingRetry, Date.now())) {
+      setPendingRetry({ ...pendingRetry, usableUntilMs: 0 })
+      return
+    }
+    retryInFlight.current = true
+    setRetrying(true)
+    try {
+      const receipt = await sendRefund(pendingRetry.request, pendingRetry.mayHaveLanded)
+      setPendingRetry(null)
+      onDone(refundSuccessCopy(receipt, pendingRetry.request))
+    } catch (err) {
+      const failure = classifyRefundFailure(err, {
+        isRetry: true, priorMayHaveLanded: pendingRetry.mayHaveLanded,
+      })
+      if (failure.retryable) {
+        setPendingRetry((current) => current && {
+          ...current, message: failure.message, mayHaveLanded: failure.mayHaveLanded,
+        })
+      } else if (failure.holdUntilExpiry) {
+        // Same window, no button: the controls stay locked until it has passed.
+        setPendingRetry((current) => current && { ...current, message: failure.message, blocked: true })
+      } else {
+        setPendingRetry(null)
+        onError(failure.message)
+      }
+    } finally {
+      retryInFlight.current = false
+      setRetrying(false)
+    }
+  }
+
   async function verifyAndExecute() {
+    if (executeInFlight.current) return
+    executeInFlight.current = true
+    try {
+      await verifyAndExecuteOnce()
+    } finally {
+      executeInFlight.current = false
+    }
+  }
+
+  async function verifyAndExecuteOnce() {
     try {
       const v = await api.otpVerify(otp.challengeId, code, otp.action, user.userId, otp.params)
       if (!v.verified) { onError(`Code rejected: ${v.failureReason ?? 'invalid'}`); return }
+      const verifiedAtMs = Date.now()
+      if (otp.action === 'refund' && !otp.params.forceResolve) {
+        await payOut(v.stepUpToken, verifiedAtMs)
+        return
+      }
       if (otp.action === 'grant_credit') {
         await api.grantCredits(user.userId, otp.params.amountCents, v.stepUpToken)
         onDone(`Granted ${otp.params.amountCents}¢ to ${user.email}`)
@@ -324,10 +413,6 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
         const r = await api.forceResolveReversed(
           user.userId, otp.params.paymentId, otp.params.note, v.stepUpToken)
         onDone(`Restored ${r.restoredCents}¢ to wallet for payment ${otp.params.paymentId}. Card is unchanged.`)
-      } else {
-        await api.refund(user.userId, otp.params.paymentId, otp.params.refundAmountCents,
-          'admin refund', v.stepUpToken, otp.params.refundRequestId)
-        onDone(`Refund issued for payment ${otp.params.paymentId}`)
       }
       setOtp(null)
     } catch (err) {
@@ -338,7 +423,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
         await loadHoldState()
         return
       }
-      onError(refundOutcomeUnknown(otp, err) ? REFUND_OUTCOME_UNKNOWN_COPY : err.message)
+      onError(err.message)
       // A refused or timed-out lift may still have changed the hold (billing unfroze, then the
       // reply was lost): re-read it so the panel never offers a lift that is already done.
       if (otp.action === 'unsuspend' || otp.action === 'wallet_unfreeze') await loadHoldState()
@@ -405,20 +490,21 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
       <div className="row">
         <div>
           <label htmlFor="refund-payment">Refund — payment ID</label>
-          <input id="refund-payment" value={refundPayment}
+          <input id="refund-payment" value={refundPayment} disabled={refundLocked}
                  onChange={(e) => setRefundPayment(e.target.value)} />
         </div>
         <div>
           <label htmlFor="refund-cents">Refund amount (cents)</label>
           <input id="refund-cents" type="number" inputMode="numeric" min="1" value={refundCents}
-                 onChange={(e) => setRefundCents(e.target.value)} />
+                 disabled={refundLocked} onChange={(e) => setRefundCents(e.target.value)} />
         </div>
         <div>
           <label htmlFor="refund-request-id">Refund request id</label>
           <input id="refund-request-id" value={refundRequestId} readOnly={refundRequestIdReadOnly}
+                 disabled={refundLocked}
                  onChange={(e) => { if (!refundRequestIdReadOnly) setRefundRequestId(e.target.value) }} />
         </div>
-        <button disabled={!refundPayment || !refundCents}
+        <button disabled={!refundPayment || !refundCents || refundLocked}
                 onClick={() => {
                   const params = {
                     paymentId: refundPayment,
@@ -430,6 +516,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
           Start OTP refund
         </button>
       </div>
+      <RefundRetryPanel pending={pendingRetry} now={now} retrying={retrying} onRetry={retryRefund} />
       <p className="sub">
         Uses live remaining on the payment. Leftover promo inside remaining can ride the
         Stripe refund.
@@ -442,7 +529,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
                  onChange={(e) => setReverseNote(e.target.value)}
                  placeholder="Stripe refund id (re_…)" />
         </div>
-        <button disabled={!refundPayment || reverseNote.trim().length < 8}
+        <button disabled={!refundPayment || reverseNote.trim().length < 8 || refundLocked}
                 onClick={() => startOtp('refund', {
                   paymentId: refundPayment,
                   forceResolve: true,
@@ -464,7 +551,8 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
             <label htmlFor="otp-code">OTP code for <code>{otp.action}</code> (check email / dev DB)</label>
             <input id="otp-code" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} maxLength={6} />
           </div>
-          <button disabled={code.length < 6} onClick={verifyAndExecute}>Verify & execute</button>
+          <button disabled={code.length < 6 || (otp.action === 'refund' && refundLocked)}
+                  onClick={verifyAndExecute}>Verify & execute</button>
           <button className="ghost" onClick={() => setOtp(null)}>Cancel</button>
         </div>
       )}

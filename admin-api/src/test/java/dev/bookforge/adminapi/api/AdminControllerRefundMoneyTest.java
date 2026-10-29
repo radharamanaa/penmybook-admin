@@ -92,6 +92,59 @@ class AdminControllerRefundMoneyTest {
     }
 
     @Test
+    void aPayoutThatNeverReachedBillingSaysNothingWasSent() {
+        when(adminService.refund(any())).thenReturn(new AdminService.RefundOutcome(
+                false, null, 0L, 0L, false, AdminService.REFUND_NOT_SENT));
+
+        ResponseEntity<Object> response = controller.refund(UUID.randomUUID(),
+                new RefundRequest(UUID.randomUUID(), 2_500L, "admin refund", null),
+                "token", jwt, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode().value()).isEqualTo(503);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response.getBody();
+        assertThat(body).containsEntry("code", "REFUND_NOT_SENT")
+                .containsEntry("message",
+                        "Billing could not be reached — nothing was sent. It is safe to retry.");
+        org.mockito.Mockito.verifyNoInteractions(auditEventWriter);
+    }
+
+    @Test
+    void aRetryThatNeverReachedBillingKeepsTheFirstAttemptWarning() {
+        when(adminService.refund(any())).thenReturn(new AdminService.RefundOutcome(
+                false, null, 0L, 0L, false, AdminService.REFUND_NOT_SENT));
+
+        ResponseEntity<Object> response = controller.refund(UUID.randomUUID(),
+                new RefundRequest(UUID.randomUUID(), 2_500L, "admin refund", null, true),
+                "token", jwt, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode().value()).isEqualTo(503);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response.getBody();
+        assertThat(body).containsEntry("code", "REFUND_NOT_SENT")
+                .containsEntry("message", "This retry did not reach billing — the first attempt may "
+                        + "still have gone through. Check the payment, or retry with the same "
+                        + "approval (it cannot pay twice).");
+    }
+
+    @Test
+    void aRefusalWithoutBillingsWordsNamesItsStatusAndSaysNothingWasPaid() {
+        when(adminService.refund(any())).thenReturn(new AdminService.RefundOutcome(
+                false, null, 0L, 0L, false, null, null, 400));
+
+        ResponseEntity<Object> response = controller.refund(UUID.randomUUID(),
+                new RefundRequest(UUID.randomUUID(), 2_500L, "admin refund", null),
+                "token", jwt, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode().value()).isEqualTo(502);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response.getBody();
+        assertThat(body).containsEntry("code", "DOWNSTREAM_REJECTED")
+                .containsEntry("message", "Billing refused the refund (HTTP 400). Nothing was paid.");
+        org.mockito.Mockito.verifyNoInteractions(auditEventWriter);
+    }
+
+    @Test
     void aReplayedPayoutIsAuditedAsAReplayNotASecondRefund() {
         UUID paymentId = UUID.randomUUID();
         when(adminService.refund(any())).thenReturn(new AdminService.RefundOutcome(

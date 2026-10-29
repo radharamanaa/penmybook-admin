@@ -29,6 +29,7 @@ import dev.bookforge.adminapi.dto.WaitlistEntryView;
 import dev.bookforge.adminapi.dto.WalletBalanceView;
 import dev.bookforge.adminapi.dto.WalletSummaryView;
 import dev.bookforge.adminapi.service.audit.AuditLogEntry;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.springframework.stereotype.Component;
 
@@ -87,6 +88,16 @@ public class HttpDownstreamClient implements DownstreamClient {
      * and a fresh OTP was a new key — a second refund (A1). nginx in front allows 75s.
      */
     static final Duration REFUND_PAYOUT_TIMEOUT = Duration.ofSeconds(60);
+    private static final int HTTP_FORBIDDEN = 403;
+    private static final int HTTP_CONFLICT = 409;
+    private static final int HTTP_BAD_GATEWAY = 502;
+    private static final int HTTP_SERVER_ERROR_MIN = 500;
+    /** Billing's problem {@code code} for an approval that is invalid or already spent. */
+    private static final String BILLING_STEP_UP_INVALID = "step_up_invalid";
+    /** Billing's 409 code for a refund whose Stripe outcome it does not know. */
+    private static final String BILLING_REFUND_OUTCOME_UNKNOWN = "refund_outcome_unknown";
+    /** Billing's 502 code for a payout POST Stripe answered and refused. */
+    private static final String BILLING_STRIPE_REFUSED_REFUND = "stripe_refused_refund";
     /** Per-book charges batch: tight budget; fail-soft on timeout so Analytics stays up. */
     private static final Duration BY_BOOKS_RPC_TIMEOUT = Duration.ofSeconds(2);
     /**
@@ -574,41 +585,134 @@ public class HttpDownstreamClient implements DownstreamClient {
         if (namedRequest != null && !namedRequest.toString().isBlank()) {
             body.put("refundRequestId", namedRequest.toString());
         }
+        Object paymentId = command.params().get("paymentId");
+        String requestJson;
         try {
-            JsonNode json = send(downstream.billingUrl() + "/internal/refund", BILLING_AUD,
-                    toJson(body), refundPayoutTimeout);
-            boolean success = json.path("success").asBoolean(false);
-            UUID auditEntryId = success ? optionalUuid(json, "auditEntryId") : null;
-            long requestedCents = json.path("requestedCents").asLong(0L);
-            long walletDebitedCents = json.path("walletDebitedCents").asLong(0L);
-            // Billing's RefundResult names it "replayed"; "idempotentReplay" is the older name.
-            boolean idempotentReplay = json.path("replayed").asBoolean(false)
-                    || json.path("idempotentReplay").asBoolean(false);
-            return DownstreamResult.refund(success, auditEntryId, requestedCents,
-                    walletDebitedCents, idempotentReplay);
-        } catch (DownstreamConflictException conflict) {
-            // 409: a refund for this payment is already awaiting Stripe's card-credit approval
-            // (billing's PENDING_CARD_REFUND guard). NOT an outage and NOT a failed action to retry
-            // now — log distinctly so ops don't chase it as a billing error. Reported as
-            // success=false (the action did not occur); the operator retries once the prior settles.
-            log.warn("Refund for payment {} rejected as a conflict (409): a prior refund is still "
-                    + "awaiting card credit — retry after it settles", command.params().get("paymentId"));
-            return new DownstreamResult(false, null, null);
-        } catch (DownstreamCallException e) {
-            if (e.timedOut()) {
-                // Billing may have refunded the card after we stopped waiting. Saying "rejected" sends
-                // staff to a fresh OTP = a new idempotency key = a second refund.
-                log.error("REFUND_OUTCOME_UNKNOWN payment={} — billing did not answer within {}",
-                        command.params().get("paymentId"), refundPayoutTimeout);
-                return DownstreamResult.refundOutcomeUnknown();
-            }
-            return new DownstreamResult(false, null, null);
+            requestJson = toJson(body);
+        } catch (DownstreamCallException unserialisable) {
+            // Nothing has been sent yet, so nothing can have moved.
+            return DownstreamResult.refundNotSent();
         }
+        JsonNode json;
+        try {
+            json = send(downstream.billingUrl() + "/internal/refund", BILLING_AUD,
+                    requestJson, refundPayoutTimeout);
+        } catch (DownstreamCallException e) {
+            return refundFailureOf(e, paymentId);
+        }
+        try {
+            return refundReceiptOf(json, paymentId);
+        } catch (RuntimeException unreadable) {
+            log.error("REFUND_OUTCOME_UNKNOWN payment={} — billing's 200 could not be read: {}",
+                    paymentId, unreadable.toString());
+            return DownstreamResult.refundOutcomeUnknown();
+        }
+    }
+
+    /** Billing's 200. One without a boolean {@code success} says nothing about what it did. */
+    private DownstreamResult refundReceiptOf(JsonNode json, Object paymentId) {
+        if (!json.path("success").isBoolean()) {
+            log.error("REFUND_OUTCOME_UNKNOWN payment={} — billing's 200 had no readable result",
+                    paymentId);
+            return DownstreamResult.refundOutcomeUnknown();
+        }
+        if (!json.path("success").asBoolean()) {
+            // Billing's only success=false: Stripe failed or cancelled the refund and billing put
+            // the wallet back.
+            return DownstreamResult.refundDeclined();
+        }
+        UUID auditEntryId = optionalUuid(json, "auditEntryId");
+        long requestedCents = json.path("requestedCents").asLong(0L);
+        long walletDebitedCents = json.path("walletDebitedCents").asLong(0L);
+        // Billing's RefundResult names it "replayed"; "idempotentReplay" is the older name.
+        boolean idempotentReplay = json.path("replayed").asBoolean(false)
+                || json.path("idempotentReplay").asBoolean(false);
+        return DownstreamResult.refund(true, auditEntryId, requestedCents,
+                walletDebitedCents, idempotentReplay);
+    }
+
+    /**
+     * What a failed payout call means. Anything after which billing may have reached Stripe is an
+     * unknown outcome, never a refusal: saying "rejected" sends staff to a fresh OTP = a new
+     * idempotency key = a second refund.
+     */
+    private DownstreamResult refundFailureOf(DownstreamCallException e, Object paymentId) {
+        if (e.status() == 0) {
+            return transportFailureOf(e, paymentId);
+        }
+        if (e.status() >= HTTP_SERVER_ERROR_MIN) {
+            if (stripeRefusedThisPost(e)) {
+                return DownstreamResult.refundStripeRefused();
+            }
+            // A bare 5xx (billing fault, or a proxy during a roll) may follow the Stripe call.
+            log.error("REFUND_OUTCOME_UNKNOWN payment={} — billing answered HTTP {}", paymentId,
+                    e.status());
+            return DownstreamResult.refundBillingError();
+        }
+        if (e.status() == HTTP_CONFLICT) {
+            return conflictOf(e, paymentId);
+        }
+        if (e.status() == HTTP_FORBIDDEN && BILLING_STEP_UP_INVALID.equals(e.code())) {
+            // Billing found no refund under this key, then refused the approval. Its 403 does not
+            // say why (bad signature, params mismatch, expired and already spent look the same);
+            // the caller knows whether this was a retry, where "already spent" is the likely one.
+            log.warn("REFUND_STEP_UP_REFUSED payment={} — billing refused the approval", paymentId);
+            return DownstreamResult.refundStepUpRefused();
+        }
+        // Every other 4xx billing raises on this path (bad request, unknown payment, nothing
+        // refundable, validation) is thrown before the wallet debit and the Stripe call.
+        return DownstreamResult.refundRefused(e.status(), blankToNull(e.detail()));
+    }
+
+    /**
+     * Billing's 409s. {@code refund_outcome_unknown} is the only one that can follow a Stripe call
+     * (contracts/internal-api.md); every other 409 on this path is raised before the wallet debit
+     * and the Stripe POST, so it is a refusal staff read word for word.
+     */
+    private static DownstreamResult conflictOf(DownstreamCallException e, Object paymentId) {
+        if (BILLING_REFUND_OUTCOME_UNKNOWN.equals(e.code())) {
+            log.error("REFUND_OUTCOME_UNKNOWN payment={} — billing: {}", paymentId, e.detail());
+            return DownstreamResult.refundBillingConflict(blankToNull(e.reason()));
+        }
+        return DownstreamResult.refundRefused(e.status(), blankToNull(e.detail()));
+    }
+
+    /**
+     * Billing's own 502 for a POST Stripe answered and refused (the submission is marked refused):
+     * its problem body carries {@code code=stripe_refused_refund} and a {@code detail}. A proxy's
+     * 502, or billing's uncoded one from its heal path, does not.
+     */
+    private static boolean stripeRefusedThisPost(DownstreamCallException e) {
+        return e.status() == HTTP_BAD_GATEWAY && BILLING_STRIPE_REFUSED_REFUND.equals(e.code())
+                && blankToNull(e.detail()) != null;
+    }
+
+    private static String blankToNull(String text) {
+        return text == null || text.isBlank() ? null : text;
     }
 
     public DownstreamResult refundFallback(AdminCommand command, Throwable t) {
         log.warn("refund short-circuited: {}", t.toString());
-        return new DownstreamResult(false, null, null);
+        // An open breaker refuses the call before any request leaves admin-api. Any other fault
+        // escaping refund() cannot prove the request was not sent.
+        return t instanceof CallNotPermittedException
+                ? DownstreamResult.refundNotSent()
+                : DownstreamResult.refundOutcomeUnknown();
+    }
+
+    /**
+     * A refund call that got no HTTP answer. Only a failed connection proves nothing left admin-api;
+     * every other fault (read timeout, reset, EOF, unreadable body) came after the request was sent,
+     * so billing may have refunded the card.
+     */
+    private DownstreamResult transportFailureOf(DownstreamCallException e, Object paymentId) {
+        if (e.getCause() instanceof java.net.ConnectException
+                || e.getCause() instanceof java.net.http.HttpConnectTimeoutException) {
+            return DownstreamResult.refundNotSent();
+        }
+        log.error("REFUND_OUTCOME_UNKNOWN payment={} — no answer from billing after sending ({}, budget {})",
+                paymentId, e.getCause(), refundPayoutTimeout);
+        return DownstreamResult.refundOutcomeUnknown();
     }
 
     /**
@@ -1178,13 +1282,15 @@ public class HttpDownstreamClient implements DownstreamClient {
                 // an outage — distinct type so the refund path can report it as "in progress".
                 JsonNode problem = problemOf(response.body());
                 throw new DownstreamConflictException("Downstream " + request.uri() + " returned HTTP 409",
-                        textOrNull(problem, "detail"), textOrNull(problem, "code"));
+                        textOrNull(problem, "detail"), textOrNull(problem, "code"),
+                        textOrNull(problem, "reason"));
             }
             if (response.statusCode() >= 400) {
                 JsonNode problem = problemOf(response.body());
                 throw new DownstreamCallException("Downstream " + request.uri() + " returned HTTP "
                         + response.statusCode(), null, response.statusCode(),
-                        textOrNull(problem, "detail"), textOrNull(problem, "code"));
+                        textOrNull(problem, "detail"), textOrNull(problem, "code"),
+                        textOrNull(problem, "reason"));
             }
             String body = response.body();
             if (body == null || body.isBlank()) {

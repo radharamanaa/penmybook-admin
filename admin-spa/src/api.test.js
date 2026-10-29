@@ -122,6 +122,30 @@ describe('api.js', () => {
       await settled
       expect(aborted).toBe(true)
     })
+
+    it('tags a request it stopped waiting for as a client timeout', async () => {
+      vi.useFakeTimers()
+      global.fetch.mockImplementation(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init.signal.addEventListener('abort', () => {
+              const err = new Error('aborted')
+              err.name = 'AbortError'
+              reject(err)
+            })
+          }),
+      )
+      const settled = expect(api.refund('u1', 'pay1', 500, 'admin refund', 'tok-abc'))
+        .rejects.toMatchObject({ status: 0, body: { code: 'CLIENT_TIMEOUT' } })
+      await vi.advanceTimersByTimeAsync(65_000)
+      await settled
+    })
+
+    it('tags a request the browser could not send as a network error', async () => {
+      global.fetch.mockRejectedValue(new TypeError('Failed to fetch'))
+      await expect(api.refund('u1', 'pay1', 500, 'admin refund', 'tok-abc'))
+        .rejects.toMatchObject({ status: 0, body: { code: 'NETWORK_ERROR' } })
+    })
   })
 
   describe('markRefundPaidByHand', () => {
@@ -179,6 +203,19 @@ describe('api.js', () => {
         amountCents: 500,
         reason: 'admin refund',
       })
+    })
+
+    it('marks a same-token retry of a payout that may have gone through', async () => {
+      await api.refund('u1', 'pay1', 500, 'admin refund', 'tok-abc', 'req-1', true)
+      const [, init] = global.fetch.mock.calls[0]
+      expect(JSON.parse(init.body)).toEqual({
+        paymentId: 'pay1',
+        amountCents: 500,
+        reason: 'admin refund',
+        refundRequestId: 'req-1',
+        retryOfUnknownOutcome: true,
+      })
+      expect(init.headers['X-Step-Up-Token']).toBe('tok-abc')
     })
   })
 

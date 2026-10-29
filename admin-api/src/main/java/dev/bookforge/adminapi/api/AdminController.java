@@ -141,9 +141,47 @@ public class AdminController {
     /** Header carrying the single-use, action-bound step-up token (spec 05 §3). */
     private static final String STEP_UP_TOKEN_HEADER = "X-Step-Up-Token";
     private static final String REJECT_STEP_UP_REQUIRED = "step_up_required";
+    /** Wire code for a same-token retry whose approval billing refused (see the message). */
+    private static final String REFUND_APPROVAL_USED = "refund_approval_used";
+    /** Billing's 409 reason: Stripe created the refund but billing could not record it. */
+    private static final String BILLING_REASON_CREDIT_REFUSED_AFTER_STRIPE = "credit_refused_after_stripe";
+
     /** Shown to staff when a payout timed out: retrying with a fresh OTP would refund twice. */
     static final String REFUND_OUTCOME_UNKNOWN_MESSAGE =
             "The refund may have gone through — check the payment before retrying.";
+    /**
+     * A same-token retry billing refused: the earlier attempt spent the approval and has recorded no
+     * refund yet, so it may still be going through (billing can take up to a minute).
+     */
+    static final String REFUND_APPROVAL_USED_MESSAGE =
+            "This approval was already used — the first attempt may still be going through. Wait a "
+                    + "minute and check the payment in Stripe before starting a new refund.";
+    /** Billing answered 5xx on a payout: it may have reached Stripe before failing. */
+    static final String REFUND_BILLING_ERROR_MESSAGE =
+            "Billing hit an error — the refund may have gone through. Check the payment before retrying.";
+    /** Billing answered 409 refund_outcome_unknown: it called Stripe and does not know the result. */
+    static final String REFUND_BILLING_CONFLICT_MESSAGE =
+            "Billing could not finish the refund — it may have gone through. Check the payment "
+                    + "before retrying.";
+    /** Appended when billing says Stripe created the refund but it could not be recorded. */
+    static final String REFUND_CREATED_NOT_RECORDED_NOTE =
+            " Billing reported: refund created but could not be recorded against the request.";
+    /** Billing's 200 success=false: Stripe failed or cancelled the refund; the wallet was put back. */
+    static final String REFUND_DECLINED_MESSAGE =
+            "Stripe declined the refund — nothing was paid.";
+    /** Billing's coded 502: Stripe answered the payout POST and refused it. */
+    static final String REFUND_STRIPE_REFUSED_MESSAGE =
+            "Stripe refused the refund — nothing was paid.";
+    /** A first attempt billing refused the approval for: nothing was paid. */
+    static final String REFUND_STEP_UP_REFUSED_MESSAGE =
+            "The approval was refused — start the refund again with a new code.";
+    /** A first attempt that never left admin-api: nothing moved and the approval is unspent. */
+    static final String REFUND_NOT_SENT_MESSAGE =
+            "Billing could not be reached — nothing was sent. It is safe to retry.";
+    /** A retry that never left admin-api: this one sent nothing, but the first may have landed. */
+    static final String REFUND_RETRY_NOT_SENT_MESSAGE =
+            "This retry did not reach billing — the first attempt may still have gone through. "
+                    + "Check the payment, or retry with the same approval (it cannot pay twice).";
 
     /** Valid admin step-up actions an OTP challenge may be started for. */
     private static final Set<String> STEP_UP_ACTIONS =
@@ -473,14 +511,17 @@ public class AdminController {
                 STEP_UP_ACTION_REFUND, stepUpToken, params);
         AdminService.RefundOutcome outcome = adminService.refund(command);
         if (!outcome.success()) {
-            if (AdminService.REFUND_OUTCOME_UNKNOWN.equals(outcome.rejectionReason())) {
-                // The card refund may have landed: leave a trace staff can match to Stripe.
+            boolean retry = body.isRetryOfUnknownOutcome();
+            String denyReason = refundDenyAuditReason(outcome.rejectionReason(), retry);
+            if (denyReason != null) {
+                // Leave a trace staff can match to Stripe (the card refund may have landed).
                 Map<String, Object> attempted = new LinkedHashMap<>(params);
-                attempted.put("reason", "outcome_unknown");
+                attempted.put("reason", denyReason);
+                attempted.put("retryOfUnknownOutcome", retry);
                 auditEventWriter.writeDeny(actorOf(jwt), ACTION_REFUND, RESOURCE_PAYMENT,
                         body.paymentId().toString(), attempted, clientIp(request));
             }
-            return refundRejection(outcome, params);
+            return refundRejection(outcome, params, retry);
         }
 
         Map<String, Object> newValue = new LinkedHashMap<>();
@@ -543,14 +584,103 @@ public class AdminController {
      * params]}}; a {@code null} reason means billing rolled the refund back → {@code 502}.
      */
     private ResponseEntity<Object> refundRejection(AdminService.RefundOutcome outcome,
-                                                   Map<String, Object> params) {
-        if (AdminService.REFUND_OUTCOME_UNKNOWN.equals(outcome.rejectionReason())) {
+                                                   Map<String, Object> params, boolean retry) {
+        String unknownMessage = outcomeUnknownMessage(outcome);
+        if (unknownMessage != null) {
             return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body(Map.of(
                     "error", AdminService.REFUND_OUTCOME_UNKNOWN,
                     "code", "REFUND_OUTCOME_UNKNOWN",
-                    "message", REFUND_OUTCOME_UNKNOWN_MESSAGE));
+                    "cause", outcomeUnknownCause(outcome.rejectionReason()),
+                    "message", unknownMessage));
+        }
+        if (AdminService.REFUND_DECLINED.equals(outcome.rejectionReason())) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of(
+                    "error", "downstream_rejected",
+                    "code", "REFUND_DECLINED",
+                    "message", REFUND_DECLINED_MESSAGE));
+        }
+        if (AdminService.REFUND_STRIPE_REFUSED.equals(outcome.rejectionReason())) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of(
+                    "error", "downstream_rejected",
+                    "code", "REFUND_STRIPE_REFUSED",
+                    "message", REFUND_STRIPE_REFUSED_MESSAGE));
+        }
+        if (AdminService.REFUND_STEP_UP_REFUSED.equals(outcome.rejectionReason())) {
+            // Billing's refusal does not say why. On a same-token retry after an unknown outcome
+            // the earlier attempt spending it is the likely cause; on a first attempt it is not.
+            return retry
+                    ? ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                            "error", REFUND_APPROVAL_USED,
+                            "code", "REFUND_APPROVAL_USED",
+                            "message", REFUND_APPROVAL_USED_MESSAGE))
+                    : ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                            "error", AdminService.REFUND_STEP_UP_REFUSED,
+                            "code", "REFUND_STEP_UP_REFUSED",
+                            "message", REFUND_STEP_UP_REFUSED_MESSAGE));
+        }
+        if (AdminService.REFUND_NOT_SENT.equals(outcome.rejectionReason())) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                    "error", AdminService.REFUND_NOT_SENT,
+                    "code", "REFUND_NOT_SENT",
+                    "message", retry ? REFUND_RETRY_NOT_SENT_MESSAGE : REFUND_NOT_SENT_MESSAGE));
+        }
+        if (outcome.rejectionReason() == null) {
+            // Billing refused before any money moved: its own words, or its status when it gave none.
+            String message = outcome.refusalMessage() != null
+                    ? outcome.refusalMessage()
+                    : "Billing refused the refund (HTTP " + outcome.refusalStatus() + "). Nothing was paid.";
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of(
+                    "error", "downstream_rejected",
+                    "code", "DOWNSTREAM_REJECTED",
+                    "message", message));
         }
         return stepUpRejectionResponse(outcome.rejectionReason(), STEP_UP_ACTION_REFUND, params);
+    }
+
+    /** The staff text for an outcome-unknown kind, or {@code null} when the outcome is known. */
+    private static String outcomeUnknownMessage(AdminService.RefundOutcome outcome) {
+        String reason = outcome.rejectionReason();
+        if (AdminService.REFUND_OUTCOME_UNKNOWN.equals(reason)) {
+            return REFUND_OUTCOME_UNKNOWN_MESSAGE;
+        }
+        if (AdminService.REFUND_BILLING_ERROR.equals(reason)) {
+            return REFUND_BILLING_ERROR_MESSAGE;
+        }
+        if (AdminService.REFUND_BILLING_CONFLICT.equals(reason)) {
+            // Billing's raw detail is not shown: some of it asserts a refund exists, which would
+            // read as certain. Only its coded reason adds a line.
+            return BILLING_REASON_CREDIT_REFUSED_AFTER_STRIPE.equals(outcome.refusalMessage())
+                    ? REFUND_BILLING_CONFLICT_MESSAGE + REFUND_CREATED_NOT_RECORDED_NOTE
+                    : REFUND_BILLING_CONFLICT_MESSAGE;
+        }
+        return null;
+    }
+
+    /** Why the outcome is unknown, so the SPA can word a retry of it truthfully. */
+    private static String outcomeUnknownCause(String reason) {
+        if (AdminService.REFUND_BILLING_ERROR.equals(reason)) {
+            return "billing_error";
+        }
+        if (AdminService.REFUND_BILLING_CONFLICT.equals(reason)) {
+            return "billing_conflict";
+        }
+        return "no_answer";
+    }
+
+    /**
+     * The DENY audit reason for a refund billing did not complete in a way staff must be able to
+     * trace, or {@code null} when no row is written (nothing was sent, or a plain rejection).
+     */
+    private static String refundDenyAuditReason(String rejectionReason, boolean retry) {
+        if (AdminService.REFUND_OUTCOME_UNKNOWN.equals(rejectionReason)
+                || AdminService.REFUND_BILLING_ERROR.equals(rejectionReason)
+                || AdminService.REFUND_BILLING_CONFLICT.equals(rejectionReason)) {
+            return "outcome_unknown";
+        }
+        if (AdminService.REFUND_STEP_UP_REFUSED.equals(rejectionReason)) {
+            return retry ? "approval_used" : "step_up_refused";
+        }
+        return null;
     }
 
     /**

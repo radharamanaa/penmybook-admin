@@ -8,6 +8,8 @@
 // an XSS can't exfiltrate what isn't persisted, and a tab refresh simply
 // re-prompts the login. Both backends accept the same token.
 
+import { CLIENT_TIMEOUT, NETWORK_ERROR } from './requestErrors.js'
+
 let _token = null
 let _onAuthExpired = () => {}
 
@@ -51,11 +53,11 @@ async function request(path, { method = 'GET', body, headers: extraHeaders, time
       signal: controller.signal,
     })
   } catch (err) {
-    throw new ApiError(0, {
-      detail: err.name === 'AbortError'
-        ? 'Request timed out — the backend may be unreachable.'
-        : `Network error: ${err.message}`,
-    })
+    // The code tells a request we stopped waiting for (it may have been handled) from one the
+    // browser could not send at all.
+    throw new ApiError(0, err.name === 'AbortError'
+      ? { detail: 'Request timed out — the backend may be unreachable.', code: CLIENT_TIMEOUT }
+      : { detail: `Network error: ${err.message}`, code: NETWORK_ERROR })
   } finally {
     clearTimeout(timer)
   }
@@ -130,12 +132,17 @@ export const api = {
     }),
   // A payout calls Stripe inline; admin-api waits up to 60s for billing, so the browser must
   // outlast it. The default 12s abort read as "failed" while the card refund still landed.
-  refund: (userId, paymentId, amountCents, reason, stepUpToken, refundRequestId) =>
+  // `retryOfUnknownOutcome`: the same token resent after an attempt that may have gone through.
+  // It is not hashed; admin-api only uses it to say what a refused approval means.
+  refund: (userId, paymentId, amountCents, reason, stepUpToken, refundRequestId,
+           retryOfUnknownOutcome = false) =>
     request(`/api/v1/admin/users/${userId}/refund`, {
       method: 'POST',
-      body: refundRequestId
-        ? { paymentId, amountCents, reason, refundRequestId }
-        : { paymentId, amountCents, reason },
+      body: {
+        paymentId, amountCents, reason,
+        ...(refundRequestId ? { refundRequestId } : {}),
+        ...(retryOfUnknownOutcome ? { retryOfUnknownOutcome: true } : {}),
+      },
       headers: { 'X-Step-Up-Token': stepUpToken },
       timeoutMs: 65_000,
     }),

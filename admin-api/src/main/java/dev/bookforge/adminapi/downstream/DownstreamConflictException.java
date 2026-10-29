@@ -13,6 +13,10 @@ public class DownstreamConflictException extends DownstreamCallException {
     }
 
     public DownstreamConflictException(String message, String detail, String code) {
-        super(message, null, 409, detail, code);
+        this(message, detail, code, null);
+    }
+
+    public DownstreamConflictException(String message, String detail, String code, String reason) {
+        super(message, null, 409, detail, code, reason);
     }
 }

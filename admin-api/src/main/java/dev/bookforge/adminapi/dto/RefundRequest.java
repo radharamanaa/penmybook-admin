@@ -21,6 +21,10 @@ import java.util.UUID;
  *                        {@code paramsHash} so a token without it cannot be replayed onto a
  *                        request payout. Required by billing if the owner has an open APPROVED
  *                        request.
+ * @param retryOfUnknownOutcome true when the SPA resends, with the SAME token, a payout an earlier
+ *                        attempt of which may have gone through. Not part of the
+ *                        {@code paramsHash} and never sent to billing: it only chooses what a
+ *                        refusal of the approval means for staff (and the audit reason).
  */
 public record RefundRequest(
         @NotNull(message = "paymentId is required")
@@ -29,5 +33,16 @@ public record RefundRequest(
         long amountCents,
         @NotBlank(message = "reason is required")
         String reason,
-        UUID refundRequestId
-) {}
+        UUID refundRequestId,
+        Boolean retryOfUnknownOutcome
+) {
+
+    /** A first attempt: not a retry of a payout whose outcome is unknown. */
+    public RefundRequest(UUID paymentId, long amountCents, String reason, UUID refundRequestId) {
+        this(paymentId, amountCents, reason, refundRequestId, null);
+    }
+
+    public boolean isRetryOfUnknownOutcome() {
+        return Boolean.TRUE.equals(retryOfUnknownOutcome);
+    }
+}

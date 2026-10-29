@@ -122,6 +122,108 @@ class AdminServiceBillingOwnsRefundTokenTest {
     }
 
     @Test
+    void aSameTokenRetryAfterATimeoutReachesBillingAndReportsTheReplay() {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("paymentId", UUID.randomUUID().toString());
+        params.put("refundAmountCents", 2_500L);
+        String hash = hasher.compute("refund", staff, target, params);
+        when(verifier.verify("token", "refund"))
+                .thenReturn(new StepUpVerifier.Result.Valid("chal", hash, Instant.now().getEpochSecond() + 60));
+        when(downstream.refund(any()))
+                .thenReturn(DownstreamResult.refundOutcomeUnknown())
+                .thenReturn(DownstreamResult.refund(true, UUID.randomUUID(), 2_500L, 2_500L, true));
+
+        AdminCommand command = new AdminCommand(staff, target, "refund", "token", params);
+        assertThat(adminService.refund(command).rejectionReason())
+                .isEqualTo(AdminService.REFUND_OUTCOME_UNKNOWN);
+        AdminService.RefundOutcome retry = adminService.refund(command);
+
+        assertThat(retry.success()).isTrue();
+        assertThat(retry.idempotentReplay()).isTrue();
+        verify(tokenStore, never()).markConsumedOnce(any(), anyLong());
+        verify(downstream, times(2)).refund(command);
+    }
+
+    @Test
+    void aRefundWhoseApprovalBillingRefusesIsStepUpRefusedNotAPlainFailure() {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("paymentId", UUID.randomUUID().toString());
+        params.put("refundAmountCents", 2_500L);
+        String hash = hasher.compute("refund", staff, target, params);
+        when(verifier.verify("token", "refund"))
+                .thenReturn(new StepUpVerifier.Result.Valid("chal", hash, Instant.now().getEpochSecond() + 60));
+        when(downstream.refund(any())).thenReturn(DownstreamResult.refundStepUpRefused());
+
+        AdminService.RefundOutcome outcome =
+                adminService.refund(new AdminCommand(staff, target, "refund", "token", params));
+
+        assertThat(outcome.success()).isFalse();
+        assertThat(outcome.rejectionReason()).isEqualTo(AdminService.REFUND_STEP_UP_REFUSED);
+    }
+
+    @Test
+    void aRefundThatNeverReachedBillingIsNotSent() {
+        assertThat(refundWith(DownstreamResult.refundNotSent()).rejectionReason())
+                .isEqualTo(AdminService.REFUND_NOT_SENT);
+    }
+
+    @Test
+    void anOpenBreakerOnARefundIsNotSent() {
+        when(downstream.refund(any())).thenThrow(
+                io.github.resilience4j.circuitbreaker.CallNotPermittedException.createCallNotPermittedException(
+                        io.github.resilience4j.circuitbreaker.CircuitBreaker.ofDefaults("billing")));
+        assertThat(refundWith(null).rejectionReason()).isEqualTo(AdminService.REFUND_NOT_SENT);
+    }
+
+    @Test
+    void aBusinessRefusalCarriesBillingsMessage() {
+        AdminService.RefundOutcome outcome =
+                refundWith(DownstreamResult.refundRefused(422, "Nothing left to refund."));
+        assertThat(outcome.rejectionReason()).isNull();
+        assertThat(outcome.refusalMessage()).isEqualTo("Nothing left to refund.");
+        assertThat(outcome.refusalStatus()).isEqualTo(422);
+    }
+
+    @Test
+    void aBilling5xxIsABillingErrorNotARejection() {
+        assertThat(refundWith(DownstreamResult.refundBillingError()).rejectionReason())
+                .isEqualTo(AdminService.REFUND_BILLING_ERROR);
+    }
+
+    @Test
+    void aConflictThatMayFollowStripeCarriesBillingsWords() {
+        AdminService.RefundOutcome outcome =
+                refundWith(DownstreamResult.refundBillingConflict("Check Stripe."));
+        assertThat(outcome.rejectionReason()).isEqualTo(AdminService.REFUND_BILLING_CONFLICT);
+        assertThat(outcome.refusalMessage()).isEqualTo("Check Stripe.");
+    }
+
+    @Test
+    void aStripeDeclineIsDeclined() {
+        assertThat(refundWith(DownstreamResult.refundDeclined()).rejectionReason())
+                .isEqualTo(AdminService.REFUND_DECLINED);
+    }
+
+    @Test
+    void anUnclassifiedFailureIsTreatedAsOutcomeUnknown() {
+        assertThat(refundWith(new DownstreamResult(false, null, null)).rejectionReason())
+                .isEqualTo(AdminService.REFUND_OUTCOME_UNKNOWN);
+    }
+
+    private AdminService.RefundOutcome refundWith(DownstreamResult answer) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("paymentId", UUID.randomUUID().toString());
+        params.put("refundAmountCents", 2_500L);
+        String hash = hasher.compute("refund", staff, target, params);
+        when(verifier.verify("token", "refund"))
+                .thenReturn(new StepUpVerifier.Result.Valid("chal", hash, Instant.now().getEpochSecond() + 60));
+        if (answer != null) {
+            when(downstream.refund(any())).thenReturn(answer);
+        }
+        return adminService.refund(new AdminCommand(staff, target, "refund", "token", params));
+    }
+
+    @Test
     void markPaidByHandLeavesTheTokenForBillingToSpend() {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("requestId", UUID.randomUUID().toString());

@@ -85,6 +85,22 @@ public class AdminService {
     private static final String REJECT_STEP_UP_INVALID = "step_up_invalid";
     /** The payout call timed out: the card refund may have happened. Never a plain failure. */
     public static final String REFUND_OUTCOME_UNKNOWN = "refund_outcome_unknown";
+    /**
+     * Billing found no refund under this operation's key and refused the approval. Whether that
+     * means "spent by an earlier attempt that may still land" depends on whether this was a retry,
+     * which only the caller knows.
+     */
+    public static final String REFUND_STEP_UP_REFUSED = "refund_step_up_refused";
+    /** The payout request never reached billing: nothing moved and the approval is still unspent. */
+    public static final String REFUND_NOT_SENT = "refund_not_sent";
+    /** Billing answered 5xx: it may have reached Stripe before failing. */
+    public static final String REFUND_BILLING_ERROR = "refund_billing_error";
+    /** Billing answered 409 refund_outcome_unknown: it called Stripe and the outcome is not known. */
+    public static final String REFUND_BILLING_CONFLICT = "refund_billing_conflict";
+    /** Stripe failed or cancelled the refund; billing put the wallet back. Nothing was paid. */
+    public static final String REFUND_DECLINED = "refund_declined";
+    /** Billing's coded 502: Stripe answered the payout POST and refused it. Nothing was paid. */
+    public static final String REFUND_STRIPE_REFUSED = "refund_stripe_refused";
 
     private final StepUpVerifier stepUpVerifier;
     private final AdminParamsHasher paramsHasher;
@@ -393,15 +409,29 @@ public class AdminService {
         }
         DownstreamResult result = callDownstream(
                 () -> downstream.refund(command),
-                () -> new DownstreamResult(false, null, null));
-        if (result.outcomeUnknown()) {
-            return RefundOutcome.rejected(REFUND_OUTCOME_UNKNOWN);
+                DownstreamResult::refundNotSent);
+        if (result.success()) {
+            return RefundOutcome.success(result.auditEntryId(), result.requestedCents(),
+                    result.walletDebitedCents(), result.idempotentReplay());
         }
-        if (!result.success()) {
-            return RefundOutcome.downstreamRejected();
-        }
-        return RefundOutcome.success(result.auditEntryId(), result.requestedCents(),
-                result.walletDebitedCents(), result.idempotentReplay());
+        return refundFailureOf(result);
+    }
+
+    private static RefundOutcome refundFailureOf(DownstreamResult result) {
+        return switch (result.refundFailure()) {
+            case BILLING_ERROR -> RefundOutcome.rejected(REFUND_BILLING_ERROR);
+            // Carries billing's coded reason (not its free-text detail) for the staff wording.
+            case BILLING_CONFLICT -> RefundOutcome.unsettled(REFUND_BILLING_CONFLICT,
+                    result.refusalDetail());
+            case STRIPE_REFUSED -> RefundOutcome.rejected(REFUND_STRIPE_REFUSED);
+            case STEP_UP_REFUSED -> RefundOutcome.rejected(REFUND_STEP_UP_REFUSED);
+            case NOT_SENT -> RefundOutcome.rejected(REFUND_NOT_SENT);
+            case DECLINED -> RefundOutcome.rejected(REFUND_DECLINED);
+            case REFUSED -> RefundOutcome.downstreamRejected(result.refusalDetail(),
+                    result.refusalStatus());
+            // A failure nobody classified cannot prove the card was not refunded.
+            case OUTCOME_UNKNOWN, NONE -> RefundOutcome.rejected(REFUND_OUTCOME_UNKNOWN);
+        };
     }
 
     /**
@@ -438,7 +468,22 @@ public class AdminService {
             long requestedCents,
             long walletDebitedCents,
             boolean idempotentReplay,
-            String rejectionReason) {
+            String rejectionReason,
+            String refusalMessage,
+            int refusalStatus) {
+
+        /** Without billing's words or status (every outcome except a refusal or a conflict). */
+        public RefundOutcome(boolean success, UUID auditEntryId, long requestedCents,
+                             long walletDebitedCents, boolean idempotentReplay,
+                             String rejectionReason) {
+            this(success, auditEntryId, requestedCents, walletDebitedCents, idempotentReplay,
+                    rejectionReason, null, 0);
+        }
+
+        /** An outcome-unknown kind that carries billing's own words. */
+        static RefundOutcome unsettled(String reason, String billingMessage) {
+            return new RefundOutcome(false, null, 0L, 0L, false, reason, billingMessage, 0);
+        }
 
         static RefundOutcome success(UUID auditEntryId, long requestedCents,
                                      long walletDebitedCents, boolean idempotentReplay) {
@@ -450,8 +495,12 @@ public class AdminService {
             return new RefundOutcome(false, null, 0L, 0L, false, reason);
         }
 
-        static RefundOutcome downstreamRejected() {
-            return new RefundOutcome(false, null, 0L, 0L, false, null);
+        /**
+         * Billing refused before any money moved; {@code refusalMessage} is its own words, if any,
+         * and {@code refusalStatus} its HTTP status.
+         */
+        static RefundOutcome downstreamRejected(String refusalMessage, int refusalStatus) {
+            return new RefundOutcome(false, null, 0L, 0L, false, null, refusalMessage, refusalStatus);
         }
     }
 

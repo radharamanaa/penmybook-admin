@@ -68,7 +68,7 @@ describe('Users refundRequestId (U4 / S7)', () => {
     await userEvent.click(screen.getByRole('button', { name: /verify & execute/i }))
 
     expect(refund).toHaveBeenCalledWith(
-      'u1', PAYMENT_ID, 2500, 'admin refund', 'tok-abc', REQUEST_ID,
+      'u1', PAYMENT_ID, 2500, 'admin refund', 'tok-abc', REQUEST_ID, false,
     )
   })
 
