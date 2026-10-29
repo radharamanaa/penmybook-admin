@@ -162,6 +162,16 @@ describe('Users — lifting a chargeback or review hold (F3)', () => {
     expect(screen.queryByRole('button', { name: /unfreeze wallet/i })).not.toBeInTheDocument()
   })
 
+  it('says a purged account is purged, not that it has no hold', async () => {
+    accountState.mockResolvedValue({ ...HELD, accountStatus: 'PURGED', walletFrozen: false,
+      walletFrozenReason: null, unrecoveredCents: 0 })
+    await manage()
+
+    expect(await screen.findByText(/account purged/i)).toBeInTheDocument()
+    expect(screen.queryByText(/no hold on this account/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /reactivate account/i })).not.toBeInTheDocument()
+  })
+
   it('does not offer reactivation for a banned account', async () => {
     accountState.mockResolvedValue({ ...HELD, accountStatus: 'BANNED' })
     await manage()

@@ -183,6 +183,9 @@ function HoldPanel({ state, note, onNoteChange, onReactivate, onUnfreeze, resetS
                      onResetStrikesChange, confirmWalletUnknown, onConfirmWalletUnknown,
                      onCancelWalletUnknown }) {
   if (!state) return null
+  if (state.accountStatus === 'PURGED') {
+    return <p className="sub">Account purged: its personal data was erased, nothing to lift.</p>
+  }
   const suspended = SUSPENDED_STATUSES.has(state.accountStatus)
   const held = suspended || state.walletFrozen
   // Billing did not answer: the wallet part is unknown, so never say "no hold" (Sonnet review).
