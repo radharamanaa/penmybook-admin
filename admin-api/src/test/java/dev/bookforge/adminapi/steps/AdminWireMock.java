@@ -51,6 +51,7 @@ public class AdminWireMock {
         System.setProperty("downstream.entitlements-url", baseUrl);
         System.setProperty("downstream.billing-url", baseUrl);
         System.setProperty("downstream.org-url", baseUrl);
+        System.setProperty("downstream.curator-url", baseUrl);
 
         resetToCanonicalStubs();
     }
@@ -116,6 +117,13 @@ public class AdminWireMock {
                 .willReturn(adminSuccess("ACTIVE")));
         server.stubFor(post(urlMatching("/internal/admin/flag_developer"))
                 .willReturn(adminSuccess(null)));
+        // book_curator content strikes (L5): a count of 2, and a reset that confirms 0.
+        server.stubFor(get(urlPathMatching("/internal/admin/users/[a-fA-F0-9-]{36}/content-strikes"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"strikes\":2}")));
+        server.stubFor(post(urlPathMatching("/internal/admin/users/[a-fA-F0-9-]{36}/content-strikes/reset"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"strikes\":0}")));
     }
 
     private static void stubBillingRefund() {

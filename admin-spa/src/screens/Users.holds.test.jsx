@@ -10,6 +10,7 @@ const accountState = vi.hoisted(() => vi.fn())
 const unsuspend = vi.hoisted(() => vi.fn())
 const unfreezeWallet = vi.hoisted(() => vi.fn())
 const refund = vi.hoisted(() => vi.fn())
+const setPlatformAdmin = vi.hoisted(() => vi.fn())
 
 vi.mock('../api.js', () => ({
   api: {
@@ -20,6 +21,7 @@ vi.mock('../api.js', () => ({
     unsuspend: (...a) => unsuspend(...a),
     unfreezeWallet: (...a) => unfreezeWallet(...a),
     refund: (...a) => refund(...a),
+    setPlatformAdmin: (...a) => setPlatformAdmin(...a),
   },
 }))
 
@@ -49,7 +51,8 @@ async function manage() {
 
 describe('Users — lifting a chargeback or review hold (F3)', () => {
   beforeEach(() => {
-    for (const fn of [otpStart, otpVerify, searchUsers, accountState, unsuspend, unfreezeWallet, refund]) {
+    for (const fn of [otpStart, otpVerify, searchUsers, accountState, unsuspend, unfreezeWallet, refund,
+      setPlatformAdmin]) {
       fn.mockReset()
     }
     searchUsers.mockResolvedValue([{ userId: 'u1', email: 'a@b.co', accountStatus: 'SUSPENDED_FOR_REVIEW' }])
@@ -90,7 +93,8 @@ describe('Users — lifting a chargeback or review hold (F3)', () => {
     await userEvent.click(screen.getByRole('button', { name: /verify & execute/i }))
 
     expect(otpVerify).toHaveBeenCalledWith('ch-1', '123456', 'unsuspend', 'u1', {})
-    expect(unsuspend).toHaveBeenCalledWith('u1', 'dispute won in Stripe', 'tok-abc')
+    expect(unsuspend).toHaveBeenCalledWith('u1', 'dispute won in Stripe', 'tok-abc',
+      { acknowledgeWalletUnknown: false, resetContentStrikes: false })
     expect(refund).not.toHaveBeenCalled()
     expect(await screen.findByText(/a@b\.co is ACTIVE again/i)).toBeInTheDocument()
   })
@@ -164,5 +168,99 @@ describe('Users — lifting a chargeback or review hold (F3)', () => {
 
     expect(await screen.findByRole('button', { name: /start otp unfreeze wallet/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /reactivate account/i })).not.toBeInTheDocument()
+  })
+
+  it('shows the content strikes and resets them only when asked (L5)', async () => {
+    accountState.mockResolvedValue({ ...HELD, contentStrikes: 3 })
+    await manage()
+
+    expect(await screen.findByText(/content strikes: 3/i)).toBeInTheDocument()
+    const reset = screen.getByRole('checkbox', { name: /reset content strikes/i })
+    expect(reset).not.toBeChecked()
+    await userEvent.click(reset)
+    await userEvent.type(screen.getByLabelText(/why are you lifting the hold/i), 'content false positive')
+    await userEvent.click(screen.getByRole('button', { name: /start otp reactivate account/i }))
+    expect(otpStart).toHaveBeenCalledWith('unsuspend', 'u1', {})
+    await userEvent.type(screen.getByLabelText(/otp code/i), '123456')
+    await userEvent.click(screen.getByRole('button', { name: /verify & execute/i }))
+
+    expect(unsuspend).toHaveBeenCalledWith('u1', 'content false positive', 'tok-abc',
+      { acknowledgeWalletUnknown: false, resetContentStrikes: true })
+  })
+
+  it('shows a recorded payment hold under a content review (L3)', async () => {
+    accountState.mockResolvedValue({ ...HELD, suspensionKind: 'CONTENT', paymentHoldKind: 'DISPUTE' })
+    await manage()
+
+    expect(await screen.findByText(/payment hold recorded/i)).toBeInTheDocument()
+    expect(screen.getByText('card dispute')).toBeInTheDocument()
+  })
+
+  it('does not show a recorded payment hold once the account is active again', async () => {
+    accountState.mockResolvedValue({ ...HELD, accountStatus: 'ACTIVE', suspensionKind: null,
+      paymentHoldKind: 'DISPUTE' })
+    await manage()
+
+    expect(await screen.findByText(/wallet frozen/i)).toBeInTheDocument()
+    expect(screen.queryByText(/payment hold recorded/i)).not.toBeInTheDocument()
+  })
+
+  it('asks before reactivating while billing is down, then sends the acknowledgement', async () => {
+    accountState.mockResolvedValue({ ...HELD, walletFrozen: false, walletFrozenReason: null,
+      unrecoveredCents: 0, walletDegraded: true })
+    await manage()
+    await userEvent.type(await screen.findByLabelText(/why are you lifting the hold/i), 'dispute won in Stripe')
+    await userEvent.click(screen.getByRole('button', { name: /start otp reactivate account/i }))
+
+    expect(otpStart).not.toHaveBeenCalled()
+    expect(screen.getByText(
+      "Billing did not answer, so we can't tell if the wallet is frozen. Reactivate anyway?")).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /reactivate anyway/i }))
+    expect(otpStart).toHaveBeenCalledWith('unsuspend', 'u1', {})
+    await userEvent.type(screen.getByLabelText(/otp code/i), '123456')
+    await userEvent.click(screen.getByRole('button', { name: /verify & execute/i }))
+
+    expect(unsuspend).toHaveBeenCalledWith('u1', 'dispute won in Stripe', 'tok-abc',
+      { acknowledgeWalletUnknown: true, resetContentStrikes: false })
+  })
+
+  it('offers the confirm when the reactivation comes back wallet_status_unknown', async () => {
+    unsuspend.mockRejectedValueOnce(Object.assign(new Error('Billing did not answer'),
+      { status: 409, body: { code: 'wallet_status_unknown' } }))
+    await manage()
+    await userEvent.type(await screen.findByLabelText(/why are you lifting the hold/i), 'dispute won in Stripe')
+    await userEvent.click(screen.getByRole('button', { name: /start otp reactivate account/i }))
+    await userEvent.type(screen.getByLabelText(/otp code/i), '123456')
+    await userEvent.click(screen.getByRole('button', { name: /verify & execute/i }))
+
+    expect(await screen.findByRole('button', { name: /reactivate anyway/i })).toBeInTheDocument()
+  })
+
+  it('shows the payment-hold refusal verbatim', async () => {
+    const copy = "Unfreeze the wallet first — this account's wallet is frozen by a payment dispute or refund."
+    unsuspend.mockRejectedValueOnce(Object.assign(new Error(copy),
+      { status: 409, body: { code: 'wallet_frozen_by_payment_hold', message: copy } }))
+    await manage()
+    await userEvent.type(await screen.findByLabelText(/why are you lifting the hold/i), 'dispute won in Stripe')
+    await userEvent.click(screen.getByRole('button', { name: /start otp reactivate account/i }))
+    await userEvent.type(screen.getByLabelText(/otp code/i), '123456')
+    await userEvent.click(screen.getByRole('button', { name: /verify & execute/i }))
+
+    expect(await screen.findByText(copy)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /reactivate anyway/i })).not.toBeInTheDocument()
+  })
+
+  it('grants platform admin only through an OTP bound to the new value (O-5)', async () => {
+    setPlatformAdmin.mockResolvedValue({ userId: 'u1', isPlatformAdmin: true })
+    await manage()
+    await userEvent.click(await screen.findByRole('button', { name: /promote to platform admin/i }))
+
+    expect(setPlatformAdmin).not.toHaveBeenCalled()
+    expect(otpStart).toHaveBeenCalledWith('set_platform_admin', 'u1', { isPlatformAdmin: true })
+    await userEvent.type(screen.getByLabelText(/otp code/i), '123456')
+    await userEvent.click(screen.getByRole('button', { name: /verify & execute/i }))
+
+    expect(otpVerify).toHaveBeenCalledWith('ch-1', '123456', 'set_platform_admin', 'u1', { isPlatformAdmin: true })
+    expect(setPlatformAdmin).toHaveBeenCalledWith('u1', true, 'tok-abc')
   })
 })

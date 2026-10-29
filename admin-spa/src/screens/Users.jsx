@@ -165,6 +165,11 @@ const HOLD_KIND_LABELS = {
   CONTENT: 'content review',
 }
 
+// Shown before a reactivation billing could not check (owner Q-D, 29 Oct 2026).
+const WALLET_UNKNOWN_CONFIRM_COPY =
+  "Billing did not answer, so we can't tell if the wallet is frozen. Reactivate anyway?"
+const WALLET_STATUS_UNKNOWN = 'wallet_status_unknown'
+
 function formatDollars(cents) {
   return `$${(cents / 100).toFixed(2)}`
 }
@@ -174,7 +179,9 @@ function formatDollars(cents) {
  * take back) and the two OTP lifts (F3). Reactivation is offered only for a suspension:
  * entitlements refuses any other status anyway.
  */
-function HoldPanel({ state, note, onNoteChange, onReactivate, onUnfreeze }) {
+function HoldPanel({ state, note, onNoteChange, onReactivate, onUnfreeze, resetStrikes,
+                     onResetStrikesChange, confirmWalletUnknown, onConfirmWalletUnknown,
+                     onCancelWalletUnknown }) {
   if (!state) return null
   const suspended = SUSPENDED_STATUSES.has(state.accountStatus)
   const held = suspended || state.walletFrozen
@@ -199,6 +206,10 @@ function HoldPanel({ state, note, onNoteChange, onReactivate, onUnfreeze }) {
         {state.walletFrozen && <> · Wallet frozen (<code>{state.walletFrozenReason}</code>)</>}
         {walletUnknown && <> · Wallet: unknown — billing did not answer</>}
       </p>
+      {suspended && state.paymentHoldKind && state.paymentHoldKind !== state.suspensionKind && (
+        <p>Payment hold recorded: <strong>{HOLD_KIND_LABELS[state.paymentHoldKind]}</strong></p>
+      )}
+      <p>Content strikes: {state.contentStrikes ?? 'unknown — the app did not answer'}</p>
       {state.unrecoveredCents > 0 && (
         <p>
           {formatDollars(state.unrecoveredCents)} could not be taken back by a refund or dispute
@@ -212,12 +223,26 @@ function HoldPanel({ state, note, onNoteChange, onReactivate, onUnfreeze }) {
                  placeholder="e.g. dispute du_… won in Stripe" />
         </div>
         {suspended && (
+          <label className="row" style={{ alignItems: 'center', gap: 6 }}>
+            <input type="checkbox" checked={resetStrikes}
+                   onChange={(e) => onResetStrikesChange(e.target.checked)} />
+            Reset content strikes
+          </label>
+        )}
+        {suspended && (
           <button disabled={!noteReady} onClick={onReactivate}>Start OTP reactivate account</button>
         )}
         {state.walletFrozen && (
           <button disabled={!noteReady} onClick={onUnfreeze}>Start OTP unfreeze wallet</button>
         )}
       </div>
+      {confirmWalletUnknown && (
+        <div className="row" role="alert">
+          <p style={{ margin: 0 }}>{WALLET_UNKNOWN_CONFIRM_COPY}</p>
+          <button onClick={onConfirmWalletUnknown}>Reactivate anyway</button>
+          <button className="ghost" onClick={onCancelWalletUnknown}>Cancel</button>
+        </div>
+      )}
     </div>
   )
 }
@@ -239,6 +264,9 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
   const [holdState, setHoldState] = useState(null)
   const [holdError, setHoldError] = useState(null)
   const [holdNote, setHoldNote] = useState('')
+  const [resetStrikes, setResetStrikes] = useState(false)
+  // Billing could not say whether the wallet is frozen: staff confirm before a reactivation.
+  const [confirmWalletUnknown, setConfirmWalletUnknown] = useState(false)
 
   // Depends on the user only: the parent's onDone/onError are new functions on every render, so
   // reporting through them here would refetch on every parent render.
@@ -254,10 +282,11 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
 
   useEffect(() => { loadHoldState() }, [loadHoldState])
 
-  async function startOtp(action, params, note = null) {
+  // `flags` ride in the request body, never in `params` (the OTP hash).
+  async function startOtp(action, params, note = null, flags = null) {
     try {
       const resp = await api.otpStart(action, user.userId, params)
-      setOtp({ action, challengeId: resp.challengeId, params, note })
+      setOtp({ action, challengeId: resp.challengeId, params, note, flags })
       setCode('')
     } catch (err) { onError(err.message) }
   }
@@ -273,9 +302,17 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
         await api.walletTopUp(user.userId, otp.params.amountCents, 'admin top-up', v.stepUpToken)
         onDone(`Topped up ${otp.params.amountCents}¢ for ${user.email}`)
       } else if (otp.action === 'unsuspend') {
-        const r = await api.unsuspend(user.userId, otp.note, v.stepUpToken)
-        onDone(`${user.email} is ${r.accountStatus} again.`)
+        const r = await api.unsuspend(user.userId, otp.note, v.stepUpToken, otp.flags)
+        if (r.contentStrikesReset === false) {
+          onError(r.contentStrikesResetError)
+        } else {
+          onDone(`${user.email} is ${r.accountStatus} again.${r.contentStrikesReset ? ' Content strikes reset.' : ''}`)
+        }
+        setResetStrikes(false)
         await loadHoldState()
+      } else if (otp.action === 'set_platform_admin') {
+        const r = await api.setPlatformAdmin(user.userId, otp.params.isPlatformAdmin, v.stepUpToken)
+        onDone(`is_platform_admin → ${r.isPlatformAdmin} for ${user.email}`)
       } else if (otp.action === 'wallet_unfreeze') {
         const r = await api.unfreezeWallet(user.userId, otp.note, v.stepUpToken)
         onDone(r.lifted ? `Wallet unfrozen for ${user.email}.` : `The wallet of ${user.email} was not frozen.`)
@@ -291,6 +328,13 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
       }
       setOtp(null)
     } catch (err) {
+      if (otp.action === 'unsuspend' && err.body?.code === WALLET_STATUS_UNKNOWN) {
+        // The token is spent: "Reactivate anyway" starts a fresh OTP that carries the flag.
+        setOtp(null)
+        setConfirmWalletUnknown(true)
+        await loadHoldState()
+        return
+      }
       onError(refundOutcomeUnknown(otp, err) ? REFUND_OUTCOME_UNKNOWN_COPY : err.message)
       // A refused or timed-out lift may still have changed the hold (billing unfroze, then the
       // reply was lost): re-read it so the panel never offers a lift that is already done.
@@ -298,11 +342,23 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
     }
   }
 
-  async function togglePlatformAdmin() {
-    try {
-      await api.setPlatformAdmin(user.userId, !user.isPlatformAdmin)
-      onDone(`is_platform_admin → ${!user.isPlatformAdmin} for ${user.email}`)
-    } catch (err) { onError(err.message) }
+  // O-5: granting or revoking platform admin is step-up gated, bound to this user and value.
+  function togglePlatformAdmin() {
+    startOtp('set_platform_admin', { isPlatformAdmin: !user.isPlatformAdmin })
+  }
+
+  function startReactivate(acknowledgeWalletUnknown) {
+    setConfirmWalletUnknown(false)
+    startOtp('unsuspend', {}, holdNote.trim(),
+      { acknowledgeWalletUnknown, resetContentStrikes: resetStrikes })
+  }
+
+  function reactivate() {
+    if (holdState?.walletDegraded === true) {
+      setConfirmWalletUnknown(true)
+      return
+    }
+    startReactivate(false)
   }
 
   return (
@@ -313,7 +369,11 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
         <div className="msg error">Could not read this user&apos;s holds: {holdError}</div>
       )}
       <HoldPanel state={holdState} note={holdNote} onNoteChange={setHoldNote}
-                 onReactivate={() => startOtp('unsuspend', {}, holdNote.trim())}
+                 resetStrikes={resetStrikes} onResetStrikesChange={setResetStrikes}
+                 confirmWalletUnknown={confirmWalletUnknown}
+                 onConfirmWalletUnknown={() => startReactivate(true)}
+                 onCancelWalletUnknown={() => setConfirmWalletUnknown(false)}
+                 onReactivate={reactivate}
                  onUnfreeze={() => startOtp('wallet_unfreeze',
                    { ownerType: 'USER', ownerId: user.userId }, holdNote.trim())} />
 

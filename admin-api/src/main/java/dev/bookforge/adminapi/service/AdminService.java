@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.bookforge.adminapi.config.DownstreamProperties;
 import dev.bookforge.adminapi.config.ServiceJwtProperties;
 import dev.bookforge.adminapi.downstream.DownstreamCallException;
+import dev.bookforge.adminapi.downstream.DownstreamConflictException;
 import dev.bookforge.adminapi.downstream.DownstreamClient;
 import dev.bookforge.adminapi.downstream.DownstreamResult;
 import dev.bookforge.adminapi.downstream.ForceResolveReversedCallResult;
@@ -19,6 +20,7 @@ import dev.bookforge.adminapi.dto.AdminActionResult;
 import dev.bookforge.adminapi.dto.AdminCommand;
 import dev.bookforge.adminapi.dto.OrgView;
 import dev.bookforge.adminapi.dto.OrgWalletStateView;
+import dev.bookforge.adminapi.dto.PlatformAdminUpdateView;
 import dev.bookforge.adminapi.dto.RefundRequestQueueEntry;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import dev.bookforge.adminapi.security.AdminParamsHasher;
@@ -67,6 +69,7 @@ public class AdminService {
     private static final String WALLET_TOP_UP = "wallet_top_up";
     private static final String WALLET_UNFREEZE = "wallet_unfreeze";
     private static final String REFUND_MARK_PAID = "refund_mark_paid";
+    private static final String SET_PLATFORM_ADMIN = "set_platform_admin";
 
     /**
      * Actions whose step-up token billing verifies AND spends in its own {@code step_up_consumption}
@@ -123,7 +126,8 @@ public class AdminService {
         DownstreamProperties downstreamProps = new DownstreamProperties(
                 resolve("ENTITLEMENTS_URL", "downstream.entitlements-url", "http://localhost:8101"),
                 resolve("BILLING_URL", "downstream.billing-url", "http://localhost:8102"),
-                resolve("ORG_URL", "downstream.org-url", "http://localhost:8103"));
+                resolve("ORG_URL", "downstream.org-url", "http://localhost:8103"),
+                resolve("CURATOR_INTERNAL_URL", "downstream.curator-url", "http://localhost:8000"));
         ServiceJwtProperties jwtProps = defaultJwtProperties();
         ObjectMapper objectMapper = new ObjectMapper();
         return new HttpDownstreamClient(downstreamProps,
@@ -153,6 +157,17 @@ public class AdminService {
      * the current status, which comes back here as {@link UnsuspendOutcome#notSuspended}.
      */
     public UnsuspendOutcome unsuspend(AdminCommand command) {
+        return unsuspend(command, false, false, null);
+    }
+
+    /**
+     * Reactivate, then (when asked) reset the curator's content-strike count (L5). Entitlements may
+     * refuse with a 409 code (wallet frozen by a payment hold; wallet unknown and not acknowledged),
+     * which comes back as {@link UnsuspendOutcome#refused}. A reset that fails after a successful
+     * reactivation is reported, never undone into a failed reactivation.
+     */
+    public UnsuspendOutcome unsuspend(AdminCommand command, boolean acknowledgeWalletUnknown,
+                                      boolean resetContentStrikes, String note) {
         StepUpVerifier.Result gate = gate(UNSUSPEND, command);
         if (gate instanceof StepUpVerifier.Result.Missing) {
             return UnsuspendOutcome.rejected(REJECT_STEP_UP_REQUIRED);
@@ -160,15 +175,30 @@ public class AdminService {
         if (!(gate instanceof StepUpVerifier.Result.Valid)) {
             return UnsuspendOutcome.rejected(REJECT_STEP_UP_INVALID);
         }
-        DownstreamResult result = callDownstream(
-                () -> downstream.unsuspend(command),
-                () -> new DownstreamResult(false, null, null));
-        if (result.success()) {
-            return UnsuspendOutcome.reactivated(result.auditEntryId(), result.accountStatus());
+        DownstreamResult result;
+        try {
+            result = callDownstream(
+                    () -> downstream.unsuspend(command, acknowledgeWalletUnknown),
+                    () -> new DownstreamResult(false, null, null));
+        } catch (DownstreamConflictException refused) {
+            return UnsuspendOutcome.refused(refused.code(), refused.detail());
         }
-        return result.accountStatus() == null
-                ? UnsuspendOutcome.downstreamRejected()
-                : UnsuspendOutcome.notSuspended(result.accountStatus());
+        if (!result.success()) {
+            return result.accountStatus() == null
+                    ? UnsuspendOutcome.downstreamRejected()
+                    : UnsuspendOutcome.notSuspended(result.accountStatus());
+        }
+        if (!resetContentStrikes) {
+            return UnsuspendOutcome.reactivated(result.auditEntryId(), result.accountStatus(), null, null);
+        }
+        try {
+            downstream.resetContentStrikes(command.targetUserId(), command.staffUserId(), note);
+            return UnsuspendOutcome.reactivated(result.auditEntryId(), result.accountStatus(), true, null);
+        } catch (DownstreamCallException | CallNotPermittedException resetFailed) {
+            return UnsuspendOutcome.reactivated(result.auditEntryId(), result.accountStatus(), false,
+                    "The account is active again, but the content strikes were not reset: "
+                            + resetFailed.getMessage());
+        }
     }
 
     /**
@@ -210,12 +240,13 @@ public class AdminService {
             wallet = downstream.walletSummary(USER_OWNER_TYPE, userId);
         } catch (DownstreamCallException | CallNotPermittedException billingDown) {
             return new AccountStateView(userId, status.accountStatus(), status.suspensionKind(),
-                    false, 0L, false, null, 0L, true);
+                    false, 0L, false, null, 0L, true, status.paymentHoldKind(),
+                    downstream.contentStrikes(userId));
         }
         return new AccountStateView(userId, status.accountStatus(), status.suspensionKind(),
                 wallet.walletExists(),
                 wallet.balanceCents(), wallet.frozen(), wallet.frozenReason(), wallet.unrecoveredCents(),
-                false);
+                false, status.paymentHoldKind(), downstream.contentStrikes(userId));
     }
 
     /**
@@ -224,22 +255,30 @@ public class AdminService {
      * downstream failed.
      */
     public record UnsuspendOutcome(boolean success, UUID auditEntryId, String accountStatus,
-                                   String rejectionReason) {
+                                   String rejectionReason, String refusalCode, String refusalMessage,
+                                   Boolean contentStrikesReset, String contentStrikesResetError) {
 
-        static UnsuspendOutcome reactivated(UUID auditEntryId, String accountStatus) {
-            return new UnsuspendOutcome(true, auditEntryId, accountStatus, null);
+        static UnsuspendOutcome reactivated(UUID auditEntryId, String accountStatus,
+                                            Boolean contentStrikesReset, String contentStrikesResetError) {
+            return new UnsuspendOutcome(true, auditEntryId, accountStatus, null, null, null,
+                    contentStrikesReset, contentStrikesResetError);
         }
 
         static UnsuspendOutcome notSuspended(String accountStatus) {
-            return new UnsuspendOutcome(false, null, accountStatus, null);
+            return new UnsuspendOutcome(false, null, accountStatus, null, null, null, null, null);
         }
 
         static UnsuspendOutcome rejected(String reason) {
-            return new UnsuspendOutcome(false, null, null, reason);
+            return new UnsuspendOutcome(false, null, null, reason, null, null, null, null);
+        }
+
+        /** Entitlements refused the reactivation (409) with a code staff must act on. */
+        static UnsuspendOutcome refused(String code, String message) {
+            return new UnsuspendOutcome(false, null, null, null, code, message, null, null);
         }
 
         static UnsuspendOutcome downstreamRejected() {
-            return new UnsuspendOutcome(false, null, null, null);
+            return new UnsuspendOutcome(false, null, null, null, null, null, null, null);
         }
     }
 
@@ -257,6 +296,27 @@ public class AdminService {
         static WalletUnfreezeOutcome downstreamRejected() {
             return new WalletUnfreezeOutcome(false, false, null);
         }
+    }
+
+    /**
+     * O-5: grant or revoke platform admin. Step-up gated and claimed here (entitlements does not
+     * spend the token); the hash binds the target user and the new value, so an approval to revoke
+     * cannot be replayed to grant.
+     */
+    public PlatformAdminOutcome setPlatformAdmin(AdminCommand command, boolean isPlatformAdmin) {
+        StepUpVerifier.Result gate = gate(SET_PLATFORM_ADMIN, command);
+        if (gate instanceof StepUpVerifier.Result.Missing) {
+            return new PlatformAdminOutcome(null, REJECT_STEP_UP_REQUIRED);
+        }
+        if (!(gate instanceof StepUpVerifier.Result.Valid)) {
+            return new PlatformAdminOutcome(null, REJECT_STEP_UP_INVALID);
+        }
+        return new PlatformAdminOutcome(
+                downstream.setIsPlatformAdmin(command.targetUserId(), isPlatformAdmin), null);
+    }
+
+    /** {@code updated} on success; otherwise the step-up {@code rejectionReason}. */
+    public record PlatformAdminOutcome(PlatformAdminUpdateView updated, String rejectionReason) {
     }
 
     public AdminActionResult flagDeveloper(AdminCommand command) {

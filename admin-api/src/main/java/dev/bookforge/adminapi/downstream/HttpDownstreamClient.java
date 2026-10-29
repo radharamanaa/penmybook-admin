@@ -66,6 +66,12 @@ public class HttpDownstreamClient implements DownstreamClient {
     private static final String ENTITLEMENTS_AUD = "entitlements";
     private static final String BILLING_AUD = "billing";
     private static final String ORG_AUD = "org";
+    private static final String CURATOR_AUD = "book_curator";
+    /**
+     * Unsuspend now reads the wallet freeze from billing inside entitlements (2 s connect + 3 s read
+     * there), so the 1 s step-up budget would time out before entitlements could answer.
+     */
+    static final Duration UNSUSPEND_RPC_TIMEOUT = Duration.ofSeconds(8);
     /** Step-up-gated writes (Phase 3a) keep the 1-second RPC budget from spec 05 §5 #9. */
     private static final Duration STEP_UP_RPC_TIMEOUT = Duration.ofSeconds(1);
     /** Phase-3b admin-portal calls use the 5-second budget mandated by the task spec. */
@@ -144,9 +150,46 @@ public class HttpDownstreamClient implements DownstreamClient {
     }
 
     @Override
-    public DownstreamResult unsuspend(AdminCommand command) {
-        return postLegacy(downstream.entitlementsUrl() + "/internal/admin/unsuspend", ENTITLEMENTS_AUD,
-                statusChangeBody(command, null));
+    public DownstreamResult unsuspend(AdminCommand command, boolean acknowledgeWalletUnknown) {
+        Map<String, Object> body = statusChangeBody(command, null);
+        if (acknowledgeWalletUnknown) {
+            body.put("acknowledgeWalletUnknown", true);
+        }
+        try {
+            JsonNode json = send(downstream.entitlementsUrl() + "/internal/admin/unsuspend", ENTITLEMENTS_AUD,
+                    toJson(body), UNSUSPEND_RPC_TIMEOUT);
+            boolean success = json.path("success").asBoolean(false);
+            return new DownstreamResult(success, success ? optionalUuid(json, "auditEntryId") : null,
+                    json.path("accountStatus").asText(null));
+        } catch (DownstreamConflictException refused) {
+            throw refused;
+        } catch (DownstreamCallException e) {
+            return new DownstreamResult(false, null, null);
+        }
+    }
+
+    @Override
+    public Integer contentStrikes(UUID userId) {
+        String url = downstream.curatorUrl() + "/internal/admin/users/" + userId + "/content-strikes";
+        try {
+            JsonNode strikes = get(url, CURATOR_AUD, IDENTITY_RPC_TIMEOUT).path("strikes");
+            return strikes.isInt() ? strikes.asInt() : null;
+        } catch (DownstreamCallException curatorDown) {
+            log.warn("content-strike read failed for user {}: {}", userId, curatorDown.getMessage());
+            return null;
+        }
+    }
+
+    @Override
+    public void resetContentStrikes(UUID userId, UUID staffUserId, String reason) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("staffUserId", staffUserId.toString());
+        body.put("reason", reason);
+        String url = downstream.curatorUrl() + "/internal/admin/users/" + userId + "/content-strikes/reset";
+        JsonNode json = send(url, CURATOR_AUD, toJson(body), ADMIN_RPC_TIMEOUT);
+        if (json.path("strikes").asInt(-1) != 0) {
+            throw new DownstreamCallException("curator did not confirm the content-strike reset", null);
+        }
     }
 
     @Override
@@ -677,7 +720,8 @@ public class HttpDownstreamClient implements DownstreamClient {
         JsonNode json = get(url, ENTITLEMENTS_AUD, STEP_UP_RPC_TIMEOUT);
         String status = json.path("accountStatus").asText(null);
         String suspensionKind = json.hasNonNull("suspensionKind") ? json.path("suspensionKind").asText() : null;
-        return new AccountStatusView(userId, status, suspensionKind);
+        String paymentHoldKind = json.hasNonNull("paymentHoldKind") ? json.path("paymentHoldKind").asText() : null;
+        return new AccountStatusView(userId, status, suspensionKind, paymentHoldKind);
     }
 
     @Override

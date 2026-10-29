@@ -48,8 +48,25 @@ public interface DownstreamClient {
     /** entitlements {@code POST /internal/admin/suspend}. */
     DownstreamResult suspend(AdminCommand command);
 
-    /** entitlements {@code POST /internal/admin/unsuspend}. */
-    DownstreamResult unsuspend(AdminCommand command);
+    /**
+     * entitlements {@code POST /internal/admin/unsuspend}. A 409 refusal (the wallet is frozen by a
+     * payment hold, or billing did not answer and staff did not acknowledge it) is thrown as
+     * {@link DownstreamConflictException} carrying entitlements' {@code code} and {@code detail};
+     * any other failure comes back as {@code success=false}.
+     */
+    DownstreamResult unsuspend(AdminCommand command, boolean acknowledgeWalletUnknown);
+
+    /**
+     * book_curator {@code GET /internal/admin/users/{userId}/content-strikes} (L5). Null when the
+     * curator does not answer: the count is shown, never needed to act.
+     */
+    Integer contentStrikes(UUID userId);
+
+    /**
+     * book_curator {@code POST /internal/admin/users/{userId}/content-strikes/reset} (L5). Throws
+     * {@link DownstreamCallException} when the curator did not confirm the reset.
+     */
+    void resetContentStrikes(UUID userId, UUID staffUserId, String reason);
 
     /** entitlements {@code POST /internal/admin/flag_developer}. */
     DownstreamResult flagDeveloper(AdminCommand command);

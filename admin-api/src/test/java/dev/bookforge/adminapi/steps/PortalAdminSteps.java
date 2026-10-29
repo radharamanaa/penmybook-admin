@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.containing;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.patchRequestedFor;
@@ -187,6 +188,121 @@ public class PortalAdminSteps {
         assertThat(body.path("accountStatus").asText()).isEqualTo(status);
         assertThat(body.path("walletDegraded").asBoolean()).isTrue();
         assertThat(body.path("walletFrozen").asBoolean()).isFalse();
+    }
+
+    @Given("the target user is suspended for a content review with a recorded dispute and {int} content strikes")
+    public void targetContentReviewWithDispute(int strikes) {
+        AdminWireMock.server().stubFor(get(urlPathEqualTo("/internal/admin/users/" + TARGET_USER + "/status"))
+                .atPriority(1)
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"accountStatus\":\"SUSPENDED_FOR_REVIEW\",\"suspensionKind\":\"CONTENT\","
+                                + "\"paymentHoldKind\":\"DISPUTE\"}")));
+        AdminWireMock.server().stubFor(get(urlPathEqualTo(
+                        "/internal/admin/users/" + TARGET_USER + "/content-strikes"))
+                .atPriority(1)
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"userId\":\"" + TARGET_USER + "\",\"strikes\":" + strikes + "}")));
+    }
+
+    @Given("the curator does not answer")
+    public void curatorDown() {
+        AdminWireMock.server().stubFor(get(urlPathMatching("/internal/admin/users/.+/content-strikes"))
+                .atPriority(1)
+                .willReturn(aResponse().withStatus(503)));
+    }
+
+    @Then("the account state shows payment hold {string} and {int} content strikes")
+    public void accountStateShowsPaymentHold(String kind, int strikes) {
+        JsonNode body = parseBody();
+        assertThat(body.path("suspensionKind").asText()).isEqualTo("CONTENT");
+        assertThat(body.path("paymentHoldKind").asText()).isEqualTo(kind);
+        assertThat(body.path("contentStrikes").asInt()).isEqualTo(strikes);
+    }
+
+    @Then("the account state shows no content-strike count")
+    public void accountStateNoStrikes() {
+        JsonNode body = parseBody();
+        assertThat(body.path("accountStatus").asText()).isEqualTo("SUSPENDED_FOR_REVIEW");
+        assertThat(body.path("contentStrikes").isNull()).isTrue();
+    }
+
+    @Given("entitlements refuses the reactivation with {string} and {string}")
+    public void entitlementsRefusesReactivation(String code, String message) {
+        AdminWireMock.server().stubFor(post(urlMatching("/internal/admin/unsuspend"))
+                .atPriority(1)
+                .willReturn(aResponse().withStatus(409).withHeader("Content-Type", "application/problem+json")
+                        .withBody("{\"status\":409,\"detail\":\"" + message + "\",\"failureKind\":\"STATE_CONFLICT\","
+                                + "\"error\":\"" + code + "\",\"code\":\"" + code + "\",\"message\":\"" + message + "\"}")));
+    }
+
+    @Then("the response message is {string}")
+    public void responseMessageIs(String message) {
+        assertThat(parseBody().path("message").asText()).isEqualTo(message);
+    }
+
+    @When("they reactivate the target user acknowledging the wallet is unknown")
+    public void reactivateAcknowledging() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("note", HOLD_NOTE);
+        body.put("acknowledgeWalletUnknown", true);
+        lastResponse = sendWithStepUp(HttpMethod.POST, "/v1/admin/users/" + TARGET_USER + "/unsuspend",
+                body, boundToken("unsuspend", TARGET_USER, Map.of()));
+    }
+
+    @Then("entitlements was asked to unsuspend with acknowledgeWalletUnknown")
+    public void unsuspendForwardedAcknowledgement() {
+        AdminWireMock.server().verify(1, postRequestedFor(urlMatching("/internal/admin/unsuspend"))
+                .withRequestBody(matchingJsonPath("$.acknowledgeWalletUnknown", equalTo("true"))));
+    }
+
+    @Then("the reactivate audit row records acknowledgeWalletUnknown")
+    public void reactivateAuditAcknowledged() {
+        AdminWireMock.server().verify(postRequestedFor(urlMatching("/internal/audit-log"))
+                .withRequestBody(matchingJsonPath("$.action", equalTo("ACCOUNT_REACTIVATE")))
+                .withRequestBody(containing("\"acknowledgeWalletUnknown\":true")));
+    }
+
+    @When("they reactivate the target user and reset the content strikes")
+    public void reactivateAndResetStrikes() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("note", HOLD_NOTE);
+        body.put("resetContentStrikes", true);
+        lastResponse = sendWithStepUp(HttpMethod.POST, "/v1/admin/users/" + TARGET_USER + "/unsuspend",
+                body, boundToken("unsuspend", TARGET_USER, Map.of()));
+    }
+
+    @Given("the curator refuses the content-strike reset")
+    public void curatorRefusesReset() {
+        AdminWireMock.server().stubFor(post(urlPathMatching("/internal/admin/users/.+/content-strikes/reset"))
+                .atPriority(1)
+                .willReturn(aResponse().withStatus(503)));
+    }
+
+    @Then("the curator was asked to reset the target user's content strikes")
+    public void curatorResetCalled() {
+        AdminWireMock.server().verify(1, postRequestedFor(urlPathEqualTo(
+                        "/internal/admin/users/" + TARGET_USER + "/content-strikes/reset"))
+                .withRequestBody(matchingJsonPath("$.staffUserId", equalTo(staffUserId.toString())))
+                .withRequestBody(matchingJsonPath("$.reason", equalTo(HOLD_NOTE))));
+    }
+
+    @Then("the curator was not asked to reset any content strikes")
+    public void curatorResetNotCalled() {
+        AdminWireMock.server().verify(0, postRequestedFor(urlPathMatching(
+                "/internal/admin/users/.+/content-strikes/reset")));
+    }
+
+    @Then("the reactivation reports the content strikes reset")
+    public void strikesResetReported() {
+        assertThat(parseBody().path("contentStrikesReset").asBoolean(false)).isTrue();
+    }
+
+    @Then("the reactivation reports the content strikes were not reset")
+    public void strikesResetFailedReported() {
+        JsonNode body = parseBody();
+        assertThat(body.path("contentStrikesReset").isBoolean()).isTrue();
+        assertThat(body.path("contentStrikesReset").asBoolean(true)).isFalse();
+        assertThat(body.path("contentStrikesResetError").asText()).contains("not reset");
     }
 
     @Given("entitlements reports the target user is {string} and not suspended")
@@ -916,10 +1032,30 @@ public class PortalAdminSteps {
         setAdmin(true);
     }
 
+    @When("they set the target user's is_platform_admin flag to true with a valid step-up token")
+    public void doSetAdminWithToken() {
+        setAdmin(true, boundToken("set_platform_admin", TARGET_USER, Map.of("isPlatformAdmin", true)));
+    }
+
+    @When("they set the target user's is_platform_admin flag to true with a token approved for false")
+    public void setAdminWithRevokeToken() {
+        setAdmin(true, boundToken("set_platform_admin", TARGET_USER, Map.of("isPlatformAdmin", false)));
+    }
+
+    @Then("entitlements was not asked to change any platform-admin flag")
+    public void platformAdminNotPatched() {
+        AdminWireMock.server().verify(0, patchRequestedFor(
+                urlPathMatching("/internal/admin/users/[a-fA-F0-9-]{36}")));
+    }
+
     private void setAdmin(boolean flag) {
+        setAdmin(flag, null);
+    }
+
+    private void setAdmin(boolean flag, String stepUpToken) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("isPlatformAdmin", flag);
-        lastResponse = send(HttpMethod.PATCH, "/v1/admin/users/" + TARGET_USER, body);
+        lastResponse = sendWithStepUp(HttpMethod.PATCH, "/v1/admin/users/" + TARGET_USER, body, stepUpToken);
     }
 
     // ───────── When — org pricing ─────────

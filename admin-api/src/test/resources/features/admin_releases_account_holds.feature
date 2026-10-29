@@ -27,6 +27,57 @@ Feature: Staff can lift a chargeback or review hold
     And entitlements was asked to unsuspend the target user
     And the audit log has an ALLOW row for action "ACCOUNT_REACTIVATE"
 
+  Scenario: The account state shows a recorded payment hold and the content strikes
+    Given a platform admin is signed in
+    And the target user is suspended for a content review with a recorded dispute and 3 content strikes
+    When they read the target user's account state
+    Then the response status is 200
+    And the account state shows payment hold "DISPUTE" and 3 content strikes
+
+  Scenario: The account state still answers when the curator does not
+    Given a platform admin is signed in
+    And the target user is suspended for review with a frozen wallet and 0 cents unrecovered
+    And the curator does not answer
+    When they read the target user's account state
+    Then the response status is 200
+    And the account state shows no content-strike count
+
+  Scenario: Reactivation is refused while the wallet is frozen by a payment hold
+    Given a platform admin is signed in
+    And entitlements refuses the reactivation with "wallet_frozen_by_payment_hold" and "Unfreeze the wallet first — this account's wallet is frozen by a payment dispute or refund."
+    When they reactivate the target user with a valid step-up token
+    Then the response status is 409
+    And the response code is "wallet_frozen_by_payment_hold"
+    And the response message is "Unfreeze the wallet first — this account's wallet is frozen by a payment dispute or refund."
+
+  Scenario: Staff who acknowledged an unknown wallet have the flag forwarded and audited
+    Given a platform admin is signed in
+    When they reactivate the target user acknowledging the wallet is unknown
+    Then the response status is 200
+    And entitlements was asked to unsuspend with acknowledgeWalletUnknown
+    And the reactivate audit row records acknowledgeWalletUnknown
+
+  Scenario: Reactivating with "reset content strikes" resets them after the reactivation
+    Given a platform admin is signed in
+    When they reactivate the target user and reset the content strikes
+    Then the response status is 200
+    And the curator was asked to reset the target user's content strikes
+    And the reactivation reports the content strikes reset
+
+  Scenario: A failed strike reset is reported and the reactivation stands
+    Given a platform admin is signed in
+    And the curator refuses the content-strike reset
+    When they reactivate the target user and reset the content strikes
+    Then the response status is 200
+    And the reactivated account status is "ACTIVE"
+    And the reactivation reports the content strikes were not reset
+
+  Scenario: Strikes are left alone unless staff ask
+    Given a platform admin is signed in
+    When they reactivate the target user with a valid step-up token
+    Then the response status is 200
+    And the curator was not asked to reset any content strikes
+
   Scenario: Reactivating an account that is not suspended changes nothing
     Given a platform admin is signed in
     And entitlements reports the target user is "BANNED" and not suspended

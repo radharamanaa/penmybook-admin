@@ -35,6 +35,8 @@ services:
       ENTITLEMENTS_URL: http://entitlements.pmb.local:8101
       BILLING_URL: http://billing.pmb.local:8102
       ORG_URL: http://org.pmb.local:8103
+      # Content-strike read/reset on the account-hold panel (curator internal endpoints).
+      CURATOR_INTERNAL_URL: http://curator.pmb.local:8000
 
   admin-spa:
     restart: unless-stopped

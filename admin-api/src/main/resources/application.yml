@@ -21,6 +21,8 @@ downstream:
   entitlements-url: ${ENTITLEMENTS_URL:http://localhost:8101}
   billing-url: ${BILLING_URL:http://localhost:8102}
   org-url: ${ORG_URL:http://localhost:8103}
+  # book_curator's internal API (content strikes, L5). Same env name book_admin reads.
+  curator-url: ${CURATOR_INTERNAL_URL:http://localhost:8000}
 
 service-jwt:
   signing-key: ${SERVICE_JWT_SIGNING_KEY:dev-only-hs256-shared-secret-change-me}

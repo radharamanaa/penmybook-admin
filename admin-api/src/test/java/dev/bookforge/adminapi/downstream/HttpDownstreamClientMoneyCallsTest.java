@@ -54,7 +54,7 @@ class HttpDownstreamClientMoneyCallsTest {
         ObjectMapper mapper = new ObjectMapper();
         String base = "http://localhost:" + BILLING.port();
         client = new HttpDownstreamClient(
-                new DownstreamProperties(base, base, base),
+                new DownstreamProperties(base, base, base, base),
                 new ServiceAccountTokenFactory(
                         new ServiceJwtProperties("dev-only-hs256-shared-secret-change-me",
                                 "bookforge-internal", "admin-api"), mapper),
@@ -106,7 +106,7 @@ class HttpDownstreamClientMoneyCallsTest {
         String unroutable = "http://10.255.255.1:81";
         ObjectMapper mapper = new ObjectMapper();
         HttpDownstreamClient unreachable = new HttpDownstreamClient(
-                new DownstreamProperties(unroutable, unroutable, unroutable),
+                new DownstreamProperties(unroutable, unroutable, unroutable, unroutable),
                 new ServiceAccountTokenFactory(
                         new ServiceJwtProperties("dev-only-hs256-shared-secret-change-me",
                                 "bookforge-internal", "admin-api"), mapper),

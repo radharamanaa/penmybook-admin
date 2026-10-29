@@ -10,6 +10,7 @@ import dev.bookforge.adminapi.dto.WaitlistAdmitView;
 import dev.bookforge.adminapi.dto.WaitlistConfigView;
 import dev.bookforge.adminapi.dto.WaitlistEntryView;
 import dev.bookforge.adminapi.dto.AccountHoldReleaseBody;
+import dev.bookforge.adminapi.dto.AccountReactivateBody;
 import dev.bookforge.adminapi.dto.AccountReactivatedView;
 import dev.bookforge.adminapi.dto.AccountStateView;
 import dev.bookforge.adminapi.dto.AdminActionResult;
@@ -133,6 +134,8 @@ public class AdminController {
     private static final String STEP_UP_ACTION_WALLET_UNFREEZE = "wallet_unfreeze";
     /** Settle an approved request paid out by hand in Stripe. Hash {requestId, providerRefundId}. */
     private static final String STEP_UP_ACTION_REFUND_MARK_PAID = "refund_mark_paid";
+    /** Grant or revoke platform admin (O-5). Hash binds the target user and {isPlatformAdmin}. */
+    private static final String STEP_UP_ACTION_SET_PLATFORM_ADMIN = "set_platform_admin";
     private static final String OWNER_TYPE_USER = "USER";
     private static final String OWNER_TYPE_ORG = "ORG";
     /** Header carrying the single-use, action-bound step-up token (spec 05 §3). */
@@ -146,7 +149,8 @@ public class AdminController {
     private static final Set<String> STEP_UP_ACTIONS =
             Set.of(STEP_UP_ACTION_GRANT_CREDIT, STEP_UP_ACTION_REFUND, STEP_UP_ACTION_WALLET_TOP_UP,
                    STEP_UP_ACTION_RESOLVE_REFUND_REQUEST, STEP_UP_ACTION_UNSUSPEND,
-                   STEP_UP_ACTION_WALLET_UNFREEZE, STEP_UP_ACTION_REFUND_MARK_PAID);
+                   STEP_UP_ACTION_WALLET_UNFREEZE, STEP_UP_ACTION_REFUND_MARK_PAID,
+                   STEP_UP_ACTION_SET_PLATFORM_ADMIN);
 
     private static final Set<String> REFUND_QUEUE_STATUSES = Set.of(
             "PENDING", "APPROVED", "REJECTED", "WITHDRAWN", "PAYING", "SETTLED");
@@ -650,13 +654,17 @@ public class AdminController {
 
     /**
      * Reactivate a suspended account (a chargeback hold or a content review). Step-up gated; the
-     * hash binds the target user only. Entitlements refuses any account that is not suspended
-     * (banned, waitlisted, soft-deleted, active) and the caller gets {@code 409 not_suspended}.
+     * hash binds the target user only ({@code acknowledgeWalletUnknown} and
+     * {@code resetContentStrikes} stay out of it, like the note, and are audited). Entitlements
+     * refuses any account that is not suspended (banned, waitlisted, soft-deleted, active) and the
+     * caller gets {@code 409 not_suspended}; it also refuses (409, its code and message relayed)
+     * while the wallet is frozen by a dispute or refund ({@code wallet_frozen_by_payment_hold}) and
+     * when billing did not answer unless staff acknowledged it ({@code wallet_status_unknown}).
      */
     @PostMapping("/users/{userId}/unsuspend")
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ResponseEntity<Object> unsuspend(@PathVariable UUID userId,
-                                            @Valid @RequestBody AccountHoldReleaseBody body,
+                                            @Valid @RequestBody AccountReactivateBody body,
                                             @RequestHeader(value = STEP_UP_TOKEN_HEADER, required = false)
                                             String stepUpToken,
                                             @AuthenticationPrincipal Jwt jwt,
@@ -664,7 +672,17 @@ public class AdminController {
         Map<String, Object> params = new LinkedHashMap<>();
         AdminCommand command = new AdminCommand(actorOf(jwt), userId,
                 STEP_UP_ACTION_UNSUSPEND, stepUpToken, params);
-        AdminService.UnsuspendOutcome outcome = adminService.unsuspend(command);
+        boolean acknowledgeWalletUnknown = Boolean.TRUE.equals(body.acknowledgeWalletUnknown());
+        boolean resetContentStrikes = Boolean.TRUE.equals(body.resetContentStrikes());
+        AdminService.UnsuspendOutcome outcome = adminService.unsuspend(
+                command, acknowledgeWalletUnknown, resetContentStrikes, body.note());
+        if (outcome.refusalCode() != null) {
+            Map<String, Object> refused = new LinkedHashMap<>();
+            refused.put("error", outcome.refusalCode());
+            refused.put("code", outcome.refusalCode());
+            refused.put("message", outcome.refusalMessage());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(refused);
+        }
         if (!outcome.success() && outcome.rejectionReason() == null && outcome.accountStatus() != null) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
                     "error", "not_suspended", "code", "NOT_SUSPENDED",
@@ -677,10 +695,15 @@ public class AdminController {
         Map<String, Object> newValue = new LinkedHashMap<>();
         newValue.put("accountStatus", outcome.accountStatus());
         newValue.put("note", body.note());
+        newValue.put("acknowledgeWalletUnknown", acknowledgeWalletUnknown);
+        newValue.put("resetContentStrikes", resetContentStrikes);
+        if (outcome.contentStrikesReset() != null) {
+            newValue.put("contentStrikesReset", outcome.contentStrikesReset());
+        }
         auditEventWriter.writeAllow(actorOf(jwt), ACTION_ACCOUNT_REACTIVATE, RESOURCE_USER,
                 userId.toString(), null, newValue, clientIp(request));
-        return ResponseEntity.ok(
-                new AccountReactivatedView(userId, outcome.accountStatus(), outcome.auditEntryId()));
+        return ResponseEntity.ok(new AccountReactivatedView(userId, outcome.accountStatus(),
+                outcome.auditEntryId(), outcome.contentStrikesReset(), outcome.contentStrikesResetError()));
     }
 
     /**
@@ -764,16 +787,28 @@ public class AdminController {
      */
     @PatchMapping("/users/{userId}")
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
-    public PlatformAdminUpdateView setPlatformAdmin(@PathVariable UUID userId,
-                                                    @Valid @RequestBody SetPlatformAdminRequest body,
-                                                    @AuthenticationPrincipal Jwt jwt,
-                                                    HttpServletRequest request) {
-        PlatformAdminUpdateView updated = downstream.setIsPlatformAdmin(userId, body.isPlatformAdmin());
+    public ResponseEntity<Object> setPlatformAdmin(@PathVariable UUID userId,
+                                                   @Valid @RequestBody SetPlatformAdminRequest body,
+                                                   @RequestHeader(value = STEP_UP_TOKEN_HEADER, required = false)
+                                                   String stepUpToken,
+                                                   @AuthenticationPrincipal Jwt jwt,
+                                                   HttpServletRequest request) {
+        // O-5: the hash binds the target user and the new value — a token approved to revoke
+        // cannot grant, and one approved for another user is refused.
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("isPlatformAdmin", body.isPlatformAdmin());
+        AdminCommand command = new AdminCommand(actorOf(jwt), userId,
+                STEP_UP_ACTION_SET_PLATFORM_ADMIN, stepUpToken, params);
+        AdminService.PlatformAdminOutcome outcome = adminService.setPlatformAdmin(command, body.isPlatformAdmin());
+        if (outcome.updated() == null) {
+            return stepUpRejectionResponse(outcome.rejectionReason(), STEP_UP_ACTION_SET_PLATFORM_ADMIN, params);
+        }
+        PlatformAdminUpdateView updated = outcome.updated();
         Map<String, Object> newValue = new LinkedHashMap<>();
         newValue.put("isPlatformAdmin", updated.isPlatformAdmin());
         auditEventWriter.writeAllow(actorOf(jwt), ACTION_SET_PLATFORM_ADMIN, RESOURCE_USER,
                 userId.toString(), null, newValue, clientIp(request));
-        return updated;
+        return ResponseEntity.ok(updated);
     }
 
     // ───────── 5. GET user search ─────────

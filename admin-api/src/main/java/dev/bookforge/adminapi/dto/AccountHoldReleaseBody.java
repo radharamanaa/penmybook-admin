@@ -4,8 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 /**
- * Body for {@code POST /v1/admin/users/{userId}/unsuspend} and
- * {@code POST /v1/admin/users/{userId}/wallet/unfreeze}. The note says why the hold is lifted (for
+ * Body for {@code POST /v1/admin/users/{userId}/wallet/unfreeze} (user and org). The note says why the hold is lifted (for
  * example the dispute that was won) and lands in the audit row; it is not part of the step-up hash.
  */
 public record AccountHoldReleaseBody(

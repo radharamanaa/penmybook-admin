@@ -109,8 +109,13 @@ export const api = {
       body: { amountCents, reason },
       headers: { 'X-Step-Up-Token': stepUpToken },
     }),
-  setPlatformAdmin: (userId, isPlatformAdmin) =>
-    request(`/api/v1/admin/users/${userId}`, { method: 'PATCH', body: { isPlatformAdmin } }),
+  // Step-up gated (O-5): the token is bound to this user and this value.
+  setPlatformAdmin: (userId, isPlatformAdmin, stepUpToken) =>
+    request(`/api/v1/admin/users/${userId}`, {
+      method: 'PATCH',
+      body: { isPlatformAdmin },
+      headers: { 'X-Step-Up-Token': stepUpToken },
+    }),
   otpStart: (action, targetUserId, params) =>
     request('/api/v1/admin/otp/start', { method: 'POST', body: { action, targetUserId, params } }),
   otpVerify: (challengeId, code, action, targetUserId, params) =>
@@ -136,10 +141,11 @@ export const api = {
     }),
   // ── account holds (F3): why a user is held, and the two step-up lifts ──
   accountState: (userId) => request(`/api/v1/admin/users/${userId}/account-state`),
-  unsuspend: (userId, note, stepUpToken) =>
+  // The flags ride in the body, not the OTP hash (which binds the target user only).
+  unsuspend: (userId, note, stepUpToken, { acknowledgeWalletUnknown = false, resetContentStrikes = false } = {}) =>
     request(`/api/v1/admin/users/${userId}/unsuspend`, {
       method: 'POST',
-      body: { note },
+      body: { note, acknowledgeWalletUnknown, resetContentStrikes },
       headers: { 'X-Step-Up-Token': stepUpToken },
     }),
   unfreezeWallet: (userId, note, stepUpToken) =>

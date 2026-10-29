@@ -17,5 +17,12 @@ public record AccountStateView(
         String walletFrozenReason,
         long unrecoveredCents,
         /** True when billing did not answer: the wallet fields are unknown, not "not frozen". */
-        boolean walletDegraded
+        boolean walletDegraded,
+        /**
+         * DISPUTE or REFUND when a payment hold reached the account, even one already suspended for
+         * a content review or by staff (L3); null otherwise.
+         */
+        String paymentHoldKind,
+        /** The curator's content-strike count (L5); null when the curator did not answer. */
+        Integer contentStrikes
 ) {}

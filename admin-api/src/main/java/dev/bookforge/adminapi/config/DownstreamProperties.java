@@ -11,5 +11,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record DownstreamProperties(
         String entitlementsUrl,
         String billingUrl,
-        String orgUrl
+        String orgUrl,
+        /** book_curator's internal API (content-strike count + reset, L5). */
+        String curatorUrl
 ) {}
