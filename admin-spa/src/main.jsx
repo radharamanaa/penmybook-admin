@@ -17,6 +17,7 @@ import Audit from './screens/Audit.jsx'
 import SystemView from './screens/SystemView.jsx'
 import TrustedSites from './screens/TrustedSites.jsx'
 import RefundRequests from './screens/RefundRequests.jsx'
+import MoneyAlerts from './screens/MoneyAlerts.jsx'
 import './styles.css'
 
 const REFUND_QUEUE_ENABLED = import.meta.env.VITE_ENABLE_REFUND_QUEUE === 'true'
@@ -37,6 +38,7 @@ const router = createBrowserRouter([
       ...(REFUND_QUEUE_ENABLED
         ? [{ path: '/refund-requests', element: <RefundRequests /> }]
         : []),
+      { path: '/money-alerts', element: <MoneyAlerts /> },
       { path: '/accounts', element: <AdminAccounts /> },
       { path: '/audit', element: <Audit /> },
       { path: '/system', element: <SystemView /> },

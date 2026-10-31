@@ -10,6 +10,12 @@ the settings files read identically side-by-side.
 from __future__ import annotations
 
 import os
+from typing import Final
+
+from app.services import mesh_keys
+
+# This service's name in mesh tokens (sub=service:book_admin) and in MESH_KEY_BOOK_ADMIN.
+MESH_CALLER: Final[str] = "book_admin"
 
 
 class Settings:
@@ -41,6 +47,10 @@ class Settings:
         "ADMIN_JWT_SECRET", "dev-insecure-admin-secret-change-me-32b!"
     )
     ADMIN_JWT_TTL_MIN: int = int(os.environ.get("ADMIN_JWT_TTL_MIN", "60"))
+    # Local development only (admin/docker-compose.yml sets it; the admin box's prod override
+    # sets false). Without it, book_admin refuses to start on a missing or known development
+    # ADMIN_JWT_SECRET / MESH_KEY_BOOK_ADMIN (app/config/startup_keys.py).
+    DEV_MODE: bool = os.environ.get("DEV_MODE", "false").strip().lower() == "true"
     # aud/iss pin the admin token to THIS surface (D4/D16 of the admin-control-plane
     # decision log): a token minted here must never validate as a mesh service token
     # and vice versa. admin-api validates the same claim set (sub/role/aud/iss/exp).
@@ -52,10 +62,14 @@ class Settings:
     ADMIN_LOGIN_MAX_FAILURES: int = int(os.environ.get("ADMIN_LOGIN_MAX_FAILURES", "5"))
     ADMIN_LOGIN_LOCKOUT_MIN: int = int(os.environ.get("ADMIN_LOGIN_LOCKOUT_MIN", "15"))
 
-    # Service identity for admin→PenMyBook pushes (D4): minted with the shared
-    # mesh key but carrying sub=service:book_admin — PenMyBook's admin-facing
-    # /internal/* routes allowlist exactly that sub (require_admin_service).
-    SERVICE_JWT_SIGNING_KEY: str = os.environ.get("SERVICE_JWT_SIGNING_KEY", "")
+    # Service identity for admin→PenMyBook pushes (D4): tokens carry
+    # sub=service:book_admin — PenMyBook's admin-facing /internal/* routes allowlist
+    # exactly that sub (require_admin_service). book_admin only SIGNS mesh tokens, so this
+    # is the key it signs with: its own MESH_KEY_BOOK_ADMIN once set, else the shared mesh
+    # key (H1 rollout, docs/security/mesh-keys.md).
+    SERVICE_JWT_SIGNING_KEY: str = mesh_keys.signing_key(
+        MESH_CALLER, os.environ.get("SERVICE_JWT_SIGNING_KEY", "")
+    )
     SERVICE_JWT_ISSUER: str = os.environ.get("SERVICE_JWT_ISSUER", "bookforge-internal")
     SERVICE_JWT_TTL_SECONDS: int = int(os.environ.get("SERVICE_JWT_TTL_SECONDS", "300"))
     ADMIN_SERVICE_SUB: str = "service:book_admin"

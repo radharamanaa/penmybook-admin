@@ -76,6 +76,8 @@ export function AdminShell({ adminEmail, onLogout, sections }) {
         {link('/feedback', 'Feedback')}
         {link('/spend', 'Spend')}
         {REFUND_QUEUE_ENABLED && link('/refund-requests', 'Refund requests')}
+        {/* Not behind the refund-queue flag: billing raises these whatever that flag says. */}
+        {link('/money-alerts', 'Money alerts')}
         <div className="group">Configure</div>
         {sections.map((s) => (
           <NavLink key={s.key} to={`/config/${s.key}`} onClick={close}>{s.label}</NavLink>

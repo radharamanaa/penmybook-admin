@@ -266,6 +266,8 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
   const [refundPayment, setRefundPayment] = useState(initialPaymentId)
   const [refundCents, setRefundCents] = useState(initialRefundCents)
   const [refundRequestId, setRefundRequestId] = useState(initialRefundRequestId)
+  // Staff's per-refund choice; bound into the OTP params, so it is fixed once the OTP starts.
+  const [refundFreeze, setRefundFreeze] = useState(false)
   const [reverseNote, setReverseNote] = useState('')
   // OTP flow state: which action is mid-challenge + the challenge id + code. `note` rides along
   // for the hold lifts but is NOT in `params`: params are exactly what the server hashes.
@@ -318,7 +320,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
 
   async function sendRefund(request, retryOfUnknownOutcome = false) {
     return api.refund(request.userId, request.paymentId, request.amountCents, request.reason,
-      request.stepUpToken, request.refundRequestId, retryOfUnknownOutcome)
+      request.stepUpToken, request.refundRequestId, retryOfUnknownOutcome, request.freezeAccount)
   }
 
   // A payout that may or may not have landed keeps its exact request + token on offer.
@@ -330,6 +332,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
       reason: REFUND_REASON,
       stepUpToken,
       refundRequestId: otp.params.refundRequestId,
+      freezeAccount: otp.params.freezeAccount === true,
     }
     setOtp(null)
     setPayoutInFlight(true)
@@ -527,10 +530,25 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
                     refundAmountCents: Number(refundCents),
                   }
                   if (refundRequestId) params.refundRequestId = refundRequestId
+                  // Hashed into the step-up only when ticked, as admin-api and billing bind it.
+                  if (refundFreeze) params.freezeAccount = true
                   startOtp('refund', params)
                 }}>
           Start OTP refund
         </button>
+      </div>
+      <div>
+        <label htmlFor="refund-freeze" style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400 }}>
+          <input id="refund-freeze" type="checkbox" checked={refundFreeze}
+                 disabled={refundLocked || otp?.action === 'refund'}
+                 onChange={(e) => setRefundFreeze(e.target.checked)} />
+          Also freeze this account
+        </label>
+        <p className="sub" style={{ margin: '4px 0 0' }}>
+          Leave unticked for an ordinary refund. Freezing stops the customer generating anything
+          and there is no self-service way back — asking for money back is not, on its own, a
+          fraud signal.
+        </p>
       </div>
       <RefundRetryPanel pending={pendingRetry} now={now} retrying={retrying} onRetry={retryRefund} />
       <p className="sub">

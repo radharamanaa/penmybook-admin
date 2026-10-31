@@ -1489,10 +1489,133 @@ public class PortalAdminSteps {
                     postRequestedFor(urlMatching("/internal/admin/unsuspend")));
             case "WALLET_UNFREEZE" -> AdminWireMock.server().verify(0,
                     postRequestedFor(urlPathEqualTo("/internal/admin/wallet/unfreeze")));
+            case "MONEY_ALERT_ACKNOWLEDGE" -> AdminWireMock.server().verify(0,
+                    postRequestedFor(urlPathMatching("/internal/admin/alerts/.*/acknowledge")));
             default -> {
                 // No-op — unknown action label means the assertion is informational only.
             }
         }
+    }
+
+    // ───────── Money alerts ─────────
+
+    private static final String ACK_PATH =
+            "/internal/admin/alerts/" + AdminWireMock.OPEN_CRITICAL_ALERT_ID + "/acknowledge";
+
+    @When("they view the open money alerts")
+    public void viewOpenMoneyAlerts() {
+        lastResponse = send(HttpMethod.GET, "/v1/admin/alerts", null);
+    }
+
+    @When("they view all money alerts")
+    public void viewAllMoneyAlerts() {
+        lastResponse = send(HttpMethod.GET, "/v1/admin/alerts?status=ALL", null);
+    }
+
+    @When("they view the open money alerts with severity {string}")
+    public void viewOpenMoneyAlertsWithSeverity(String severity) {
+        lastResponse = send(HttpMethod.GET, "/v1/admin/alerts?severity=" + severity, null);
+    }
+
+    @When("they view money alerts with status {string}")
+    public void viewMoneyAlertsWithStatus(String status) {
+        lastResponse = send(HttpMethod.GET, "/v1/admin/alerts?status=" + status, null);
+    }
+
+    @When("they view the open money alerts while billing is unavailable")
+    public void viewOpenMoneyAlertsBillingDown() {
+        AdminWireMock.server().stubFor(get(urlPathEqualTo("/internal/admin/alerts"))
+                .atPriority(1)
+                .willReturn(aResponse().withStatus(503)));
+        lastResponse = send(HttpMethod.GET, "/v1/admin/alerts", null);
+    }
+
+    @Then("the money alert list is not degraded and shows billing's open alerts")
+    public void moneyAlertsNotDegraded() {
+        JsonNode body = parseBody();
+        assertThat(body.path("degraded").asBoolean()).isFalse();
+        JsonNode alerts = body.path("alerts");
+        assertThat(alerts).hasSize(2);
+        JsonNode first = alerts.get(0);
+        assertThat(first.path("id").asText()).isEqualTo(AdminWireMock.OPEN_WARNING_ALERT_ID);
+        assertThat(first.path("alertType").asText()).isEqualTo("REFUND_HEAL_SHORTFALL");
+        assertThat(first.path("severity").asText()).isEqualTo("WARNING");
+        assertThat(first.path("subject").asText()).isEqualTo("Refund shortfall");
+        assertThat(first.path("body").asText()).isEqualTo("The wallet could not cover the refund.");
+        assertThat(first.path("createdAt").asText()).isEqualTo("2026-10-30T12:00:00Z");
+        assertThat(first.path("emailError").asText()).isEqualTo("not sent");
+        assertThat(first.path("acknowledgedAt").isNull()).isTrue();
+    }
+
+    @Then("billing was asked for the open alerts")
+    public void billingAskedForOpenAlerts() {
+        AdminWireMock.server().verify(com.github.tomakehurst.wiremock.client.WireMock
+                .getRequestedFor(urlPathEqualTo("/internal/admin/alerts"))
+                .withQueryParam("status", equalTo("OPEN"))
+                .withQueryParam("limit", equalTo("200")));
+    }
+
+    @Then("the money alert list shows the closed alert before the open ones")
+    public void moneyAlertsAllNewestFirst() {
+        JsonNode alerts = parseBody().path("alerts");
+        assertThat(alerts).hasSize(3);
+        assertThat(alerts.get(0).path("id").asText()).isEqualTo(AdminWireMock.CLOSED_ALERT_ID);
+        assertThat(alerts.get(0).path("resolutionNote").asText()).isEqualTo("handled");
+        assertThat(alerts.get(1).path("id").asText()).isEqualTo(AdminWireMock.OPEN_WARNING_ALERT_ID);
+        assertThat(alerts.get(2).path("id").asText()).isEqualTo(AdminWireMock.OPEN_CRITICAL_ALERT_ID);
+    }
+
+    @Then("every money alert listed is {string}")
+    public void everyMoneyAlertIs(String severity) {
+        JsonNode alerts = parseBody().path("alerts");
+        assertThat(alerts).isNotEmpty();
+        alerts.forEach(alert -> assertThat(alert.path("severity").asText()).isEqualTo(severity));
+    }
+
+    @Then("the money alert list is marked degraded rather than empty-and-fine")
+    public void moneyAlertsDegraded() {
+        JsonNode body = parseBody();
+        assertThat(body.path("degraded").asBoolean()).isTrue();
+        assertThat(body.path("alerts").isArray()).isTrue();
+        assertThat(body.path("alerts")).isEmpty();
+    }
+
+    @Given("another admin already acknowledged the money alert")
+    public void anotherAdminAcknowledged() {
+        stubAcknowledge(UUID.randomUUID().toString(), "someone else handled it");
+    }
+
+    @When("they acknowledge the money alert with note {string}")
+    public void acknowledgeMoneyAlert(String note) {
+        if (AdminWireMock.server().getStubMappings().stream().noneMatch(m ->
+                ACK_PATH.equals(m.getRequest().getUrlPath()))) {
+            stubAcknowledge(staffUserId.toString(), note.trim());
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("note", note);
+        lastResponse = send(HttpMethod.POST,
+                "/v1/admin/alerts/" + AdminWireMock.OPEN_CRITICAL_ALERT_ID + "/acknowledge", body);
+    }
+
+    private void stubAcknowledge(String acknowledgedBy, String note) {
+        AdminWireMock.server().stubFor(post(urlPathEqualTo(ACK_PATH))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody(AdminWireMock.moneyAlertJson(AdminWireMock.OPEN_CRITICAL_ALERT_ID,
+                                "CRITICAL", "2026-10-30T11:00:00Z", "2026-10-30T14:00:00Z",
+                                acknowledgedBy, note))));
+    }
+
+    @Then("billing was told the admin acknowledged it with note {string}")
+    public void billingToldWhoAndWhy(String note) {
+        AdminWireMock.server().verify(postRequestedFor(urlPathEqualTo(ACK_PATH))
+                .withRequestBody(matchingJsonPath("$.staffUserId", equalTo(staffUserId.toString())))
+                .withRequestBody(matchingJsonPath("$.note", equalTo(note))));
+    }
+
+    @Then("billing was not asked to acknowledge the money alert")
+    public void billingNotAskedToAcknowledge() {
+        AdminWireMock.server().verify(0, postRequestedFor(urlPathEqualTo(ACK_PATH)));
     }
 
     private ResponseEntity<String> send(HttpMethod method, String path, Map<String, Object> body) {

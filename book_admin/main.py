@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import settings
+from app.config.startup_keys import refuse_dev_keys_unless_dev
 from app.db.mongo import close_db
 from api.routers.admin import router as admin_router
 from api.routers.admin_config import router as admin_config_router
@@ -36,6 +37,12 @@ _logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # S3/S4: outside DEV_MODE, a missing or known development signing key stops the service here.
+    refuse_dev_keys_unless_dev(
+        dev_mode=settings.DEV_MODE,
+        admin_jwt_secret=settings.ADMIN_JWT_SECRET,
+        signing_key=settings.SERVICE_JWT_SIGNING_KEY,
+    )
     # Self-heal admin login: create the configured bootstrap admin(s) if the
     # admin_users collection is empty (fresh DB / after a data wipe). Idempotent
     # create-if-absent — never resets an existing admin's password. Best-effort.

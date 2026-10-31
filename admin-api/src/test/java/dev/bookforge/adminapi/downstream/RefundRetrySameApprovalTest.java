@@ -14,6 +14,7 @@ import dev.bookforge.adminapi.security.InMemoryStepUpTokenStore;
 import dev.bookforge.adminapi.security.StepUpTokenIssuer;
 import dev.bookforge.adminapi.service.AdminOtpService;
 import dev.bookforge.adminapi.service.AdminService;
+import dev.bookforge.adminapi.service.MoneyAlertService;
 import dev.bookforge.adminapi.service.SpendOverviewService;
 import dev.bookforge.adminapi.service.StepUpVerifier;
 import dev.bookforge.adminapi.service.audit.AuditEventWriter;
@@ -103,7 +104,7 @@ class RefundRetrySameApprovalTest {
         AdminService adminService = new AdminService(new StepUpVerifier(jwtProperties), hasher,
                 new InMemoryStepUpTokenStore(), downstream);
         controller = new AdminController(downstream, auditEventWriter, adminService,
-                adminOtpService, spendOverviewService);
+                adminOtpService, spendOverviewService, new MoneyAlertService(downstream));
         jwt = Jwt.withTokenValue("t").header("alg", "none").subject(staff.toString())
                 .issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(60)).build();
 

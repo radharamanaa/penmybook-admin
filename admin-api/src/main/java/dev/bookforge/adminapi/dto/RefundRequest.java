@@ -25,6 +25,11 @@ import java.util.UUID;
  *                        attempt of which may have gone through. Not part of the
  *                        {@code paramsHash} and never sent to billing: it only chooses what a
  *                        refusal of the approval means for staff (and the audit reason).
+ * @param freezeAccount   true when staff ticked "Also freeze this account": billing freezes the
+ *                        wallet and suspends the account after this refund. Null or false means
+ *                        do not freeze. A freeze is bound into the step-up {@code paramsHash}
+ *                        ({@code freezeAccount=true}), so a token approved without a freeze cannot
+ *                        be sent with one, and the reverse.
  */
 public record RefundRequest(
         @NotNull(message = "paymentId is required")
@@ -34,15 +39,26 @@ public record RefundRequest(
         @NotBlank(message = "reason is required")
         String reason,
         UUID refundRequestId,
-        Boolean retryOfUnknownOutcome
+        Boolean retryOfUnknownOutcome,
+        Boolean freezeAccount
 ) {
 
     /** A first attempt: not a retry of a payout whose outcome is unknown. */
     public RefundRequest(UUID paymentId, long amountCents, String reason, UUID refundRequestId) {
-        this(paymentId, amountCents, reason, refundRequestId, null);
+        this(paymentId, amountCents, reason, refundRequestId, null, null);
+    }
+
+    /** No freeze. */
+    public RefundRequest(UUID paymentId, long amountCents, String reason, UUID refundRequestId,
+                         Boolean retryOfUnknownOutcome) {
+        this(paymentId, amountCents, reason, refundRequestId, retryOfUnknownOutcome, null);
     }
 
     public boolean isRetryOfUnknownOutcome() {
         return Boolean.TRUE.equals(retryOfUnknownOutcome);
+    }
+
+    public boolean shouldFreezeAccount() {
+        return Boolean.TRUE.equals(freezeAccount);
     }
 }

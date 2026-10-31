@@ -584,8 +584,8 @@ public class AdminService {
             return WalletTopUpOutcome.rejected(REJECT_STEP_UP_INVALID);
         }
         try {
-            long balanceCents = downstream.walletTopUp(command.targetUserId(), amountCents, reason,
-                    command.stepUpToken()).balanceCents();
+            long balanceCents = downstream.walletTopUp(command.targetUserId(), command.staffUserId(),
+                    amountCents, reason, command.stepUpToken()).balanceCents();
             return WalletTopUpOutcome.success(balanceCents);
         } catch (CallNotPermittedException e) {
             return WalletTopUpOutcome.rejected(null);

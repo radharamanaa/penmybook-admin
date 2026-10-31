@@ -428,9 +428,9 @@ class HttpDownstreamClientMoneyCallsTest {
 
     @Test
     void topUpWithoutAStepUpTokenIsRefusedNotKeyedOnNull() {
-        assertThatThrownBy(() -> client.walletTopUp(UUID.randomUUID(), 500L, "admin top-up", null))
+        assertThatThrownBy(() -> client.walletTopUp(UUID.randomUUID(), UUID.randomUUID(), 500L, "admin top-up", null))
                 .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> client.walletTopUp(UUID.randomUUID(), 500L, "admin top-up", " "))
+        assertThatThrownBy(() -> client.walletTopUp(UUID.randomUUID(), UUID.randomUUID(), 500L, "admin top-up", " "))
                 .isInstanceOf(IllegalStateException.class);
         BILLING.verify(0, postRequestedFor(urlEqualTo("/internal/wallet/credit")));
     }
@@ -442,10 +442,65 @@ class HttpDownstreamClientMoneyCallsTest {
                         .withHeader("Content-Type", "application/json")
                         .withBody("{\"balanceCents\":1500}")));
 
-        client.walletTopUp(UUID.randomUUID(), 500L, "admin top-up", TOKEN);
+        client.walletTopUp(UUID.randomUUID(), UUID.randomUUID(), 500L, "admin top-up", TOKEN);
 
         BILLING.verify(postRequestedFor(urlEqualTo("/internal/wallet/credit"))
                 .withRequestBody(containing("\"idempotencyKey\":\"admin-topup:" + CHALLENGE_ID + "\"")));
+    }
+
+    @Test
+    void topUpForwardsTheStepUpTokenAndStaffIdForBillingToVerify() {
+        BILLING.stubFor(post(urlEqualTo("/internal/wallet/credit"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"balanceCents\":1500}")));
+        UUID staff = UUID.randomUUID();
+
+        client.walletTopUp(UUID.randomUUID(), staff, 500L, "admin top-up", TOKEN);
+
+        BILLING.verify(postRequestedFor(urlEqualTo("/internal/wallet/credit"))
+                .withRequestBody(containing("\"stepUpToken\":\"" + TOKEN + "\""))
+                .withRequestBody(containing("\"staffUserId\":\"" + staff + "\"")));
+    }
+
+    @Test
+    void grantCreditForwardsTheStepUpTokenForBillingToVerify() {
+        BILLING.stubFor(post(urlEqualTo("/internal/admin/grant_credit"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"success\":true,\"auditEntryId\":\"" + UUID.randomUUID() + "\"}")));
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("amountCents", 500L);
+
+        client.grantCredit(new AdminCommand(UUID.randomUUID(), UUID.randomUUID(), "grant_credit",
+                TOKEN, params));
+
+        BILLING.verify(postRequestedFor(urlEqualTo("/internal/admin/grant_credit"))
+                .withRequestBody(containing("\"stepUpToken\":\"" + TOKEN + "\""))
+                .withRequestBody(containing("\"stepUpChallengeId\":\"" + CHALLENGE_ID + "\"")));
+    }
+
+    @Test
+    void resolveRefundRequestForwardsTheStepUpTokenForBillingToVerify() {
+        UUID requestId = UUID.randomUUID();
+        String path = "/internal/refund-requests/" + requestId + "/resolve";
+        BILLING.stubFor(post(urlEqualTo(path))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"status\":\"APPROVED\",\"approvedAmountCents\":2500}")));
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("requestId", requestId.toString());
+        params.put("decision", "APPROVE");
+        params.put("amountCents", 2_500L);
+        params.put("note", "ok");
+
+        client.resolveRefundRequest(new AdminCommand(UUID.randomUUID(), null,
+                "resolve_refund_request", TOKEN, params));
+
+        // The bare challenge id stays until every billing runs the token check (rollout order).
+        BILLING.verify(postRequestedFor(urlEqualTo(path))
+                .withRequestBody(containing("\"stepUpToken\":\"" + TOKEN + "\""))
+                .withRequestBody(containing("\"stepUpChallengeId\":\"" + CHALLENGE_ID + "\"")));
     }
 
     @Test

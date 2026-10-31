@@ -6,6 +6,8 @@ import dev.bookforge.adminapi.config.DownstreamProperties;
 import dev.bookforge.adminapi.dto.AccountStatusView;
 import dev.bookforge.adminapi.dto.AdminCommand;
 import dev.bookforge.adminapi.dto.GlobalWalletSummaryView;
+import dev.bookforge.adminapi.dto.MoneyAlertEntry;
+import dev.bookforge.adminapi.dto.MoneyAlertQueueView;
 import dev.bookforge.adminapi.dto.MoneyFlowsView;
 import dev.bookforge.adminapi.dto.OrgPricingRuleView;
 import dev.bookforge.adminapi.dto.OrgView;
@@ -150,6 +152,9 @@ public class HttpDownstreamClient implements DownstreamClient {
         body.put("reason", command.params().getOrDefault("reason", "goodwill"));
         body.put("staffUserId", command.staffUserId().toString());
         body.put("stepUpChallengeId", challengeIdOf(command.stepUpToken()));
+        // Entitlements hands the full token to billing, which verifies and spends it before it
+        // mints the ADMIN_CREDIT (security B4).
+        body.put("stepUpToken", command.stepUpToken());
         return postLegacy(downstream.entitlementsUrl() + "/internal/admin/grant_credit",
                 ENTITLEMENTS_AUD, body);
     }
@@ -507,6 +512,10 @@ public class HttpDownstreamClient implements DownstreamClient {
         // stable-key contract the refund path uses. A fresh UUID per call would defeat billing's
         // claim guard on a retry.
         body.put("stepUpChallengeId", challengeIdOf(command.stepUpToken()));
+        // Billing verifies and spends the resolve_refund_request token itself (security S1). The
+        // bare challenge id above stays until every billing has that check: an older billing
+        // requires it, a newer one ignores it.
+        body.put("stepUpToken", command.stepUpToken());
         String url = downstream.billingUrl() + "/internal/refund-requests/"
                 + command.params().get("requestId") + "/resolve";
         try {
@@ -562,6 +571,60 @@ public class HttpDownstreamClient implements DownstreamClient {
     }
 
     @Override
+    @CircuitBreaker(name = CB_BILLING_REPORTS, fallbackMethod = "listMoneyAlertsFallback")
+    public MoneyAlertQueueView listMoneyAlerts(String status, int limit) {
+        String url = downstream.billingUrl() + "/internal/admin/alerts?status="
+                + URLEncoder.encode(status, StandardCharsets.UTF_8) + "&limit=" + limit;
+        try {
+            JsonNode json = get(url, BILLING_AUD, ADMIN_RPC_TIMEOUT);
+            if (json == null || !json.isArray()) {
+                log.warn("money-alert list: expected a JSON array");
+                return new MoneyAlertQueueView(true, List.of());
+            }
+            List<MoneyAlertEntry> rows = new ArrayList<>();
+            for (JsonNode n : json) {
+                rows.add(moneyAlertOf(n));
+            }
+            return new MoneyAlertQueueView(false, rows);
+        } catch (DownstreamCallException e) {
+            log.warn("money-alert list unavailable: {}", e.getMessage());
+            return new MoneyAlertQueueView(true, List.of());
+        }
+    }
+
+    public MoneyAlertQueueView listMoneyAlertsFallback(String status, int limit, Throwable t) {
+        log.warn("money-alert list short-circuited: {}", t.toString());
+        return new MoneyAlertQueueView(true, List.of());
+    }
+
+    /** A write: not circuit-broken into a silent success, and billing's refusal is thrown. */
+    @Override
+    public MoneyAlertEntry acknowledgeMoneyAlert(UUID alertId, UUID staffUserId, String note) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("staffUserId", staffUserId.toString());
+        body.put("note", note);
+        String url = downstream.billingUrl() + "/internal/admin/alerts/" + alertId + "/acknowledge";
+        return moneyAlertOf(send(url, BILLING_AUD, toJson(body), ADMIN_RPC_TIMEOUT));
+    }
+
+    private MoneyAlertEntry moneyAlertOf(JsonNode n) {
+        return new MoneyAlertEntry(
+                UUID.fromString(n.path("id").asText()),
+                textOrNull(n, "alertType"),
+                textOrNull(n, "severity"),
+                textOrNull(n, "subject"),
+                textOrNull(n, "body"),
+                textOrNull(n, "ownerType"),
+                optionalUuid(n, "ownerId"),
+                optionalUuid(n, "paymentId"),
+                parseInstant(textOrNull(n, "createdAt")),
+                textOrNull(n, "emailError"),
+                parseInstant(textOrNull(n, "acknowledgedAt")),
+                optionalUuid(n, "acknowledgedBy"),
+                textOrNull(n, "resolutionNote"));
+    }
+
+    @Override
     @CircuitBreaker(name = CB_BILLING, fallbackMethod = "refundFallback")
     public DownstreamResult refund(AdminCommand command) {
         // billing POST /internal/refund (D6 / P11). The body carries the FULL step-up token — billing
@@ -588,6 +651,11 @@ public class HttpDownstreamClient implements DownstreamClient {
         Object namedRequest = command.params().get("refundRequestId");
         if (namedRequest != null && !namedRequest.toString().isBlank()) {
             body.put("refundRequestId", namedRequest.toString());
+        }
+        // Staff's "Also freeze this account" — the same hashed param billing re-checks, so it is
+        // sent exactly when it was approved. Absent means billing does not freeze.
+        if (Boolean.TRUE.equals(command.params().get("freezeAccount"))) {
+            body.put("freezeAccount", true);
         }
         Object paymentId = command.params().get("paymentId");
         String requestJson;
@@ -885,8 +953,8 @@ public class HttpDownstreamClient implements DownstreamClient {
 
     @Override
     @CircuitBreaker(name = CB_BILLING)
-    public WalletBalanceView walletTopUp(UUID userId, long amountCents, String reason,
-                                         String stepUpToken) {
+    public WalletBalanceView walletTopUp(UUID userId, UUID staffUserId, long amountCents,
+                                         String reason, String stepUpToken) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("ownerType", "USER");
         body.put("ownerId", userId.toString());
@@ -908,6 +976,10 @@ public class HttpDownstreamClient implements DownstreamClient {
             throw new IllegalStateException("wallet top-up needs a step-up token");
         }
         body.put("idempotencyKey", "admin-topup:" + challengeId);
+        // Billing verifies and spends the wallet_top_up token, bound to {staff, user, amountCents},
+        // before it mints the ADMIN_CREDIT (security B4).
+        body.put("staffUserId", staffUserId.toString());
+        body.put("stepUpToken", stepUpToken);
         String url = downstream.billingUrl() + "/internal/wallet/credit";
         JsonNode json = send(url, BILLING_AUD, toJson(body), ADMIN_RPC_TIMEOUT);
         long balance = json.path("balanceCents").asLong(0L);
@@ -1222,9 +1294,10 @@ public class HttpDownstreamClient implements DownstreamClient {
      * step-up token's first pipe-delimited segment IS that challenge id
      * ({@code challengeId|action|paramsHash|expiresAt|signature}). Forwarding the FULL token string
      * (as the prior code did) made Jackson reject it as a malformed UUID (400). We extract the
-     * challenge-id segment with {@code split('|',2)[0]}. The token is admin-api's OWN gate; the
-     * downstream callees do not re-verify it, so the challenge id is all they need for their own
-     * single-use ledger. Returns {@code null} for a null/blank token (the gate already rejected).
+     * challenge-id segment with {@code split('|',2)[0]}. Callees that only record the challenge id
+     * get this; the money calls billing re-verifies (refund, unfreeze, mark paid, resolve, admin
+     * credit) also get the full token. Returns {@code null} for a null/blank token (the gate
+     * already rejected).
      */
     private String challengeIdOf(String stepUpToken) {
         if (stepUpToken == null || stepUpToken.isBlank()) {

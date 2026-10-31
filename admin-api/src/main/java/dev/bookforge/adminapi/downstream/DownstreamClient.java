@@ -5,6 +5,8 @@ import dev.bookforge.adminapi.dto.RefundRequestQueueView;
 import dev.bookforge.adminapi.dto.AccountStatusView;
 import dev.bookforge.adminapi.dto.AdminCommand;
 import dev.bookforge.adminapi.dto.GlobalWalletSummaryView;
+import dev.bookforge.adminapi.dto.MoneyAlertEntry;
+import dev.bookforge.adminapi.dto.MoneyAlertQueueView;
 import dev.bookforge.adminapi.dto.MoneyFlowsView;
 import dev.bookforge.adminapi.dto.OrgPricingRuleView;
 import dev.bookforge.adminapi.dto.OrgView;
@@ -144,7 +146,8 @@ public interface DownstreamClient {
      * wallet balance so the controller can surface it directly to the SPA. The step-up token's
      * challenge id becomes billing's idempotency key, so one approval credits at most once.
      */
-    WalletBalanceView walletTopUp(UUID userId, long amountCents, String reason, String stepUpToken);
+    WalletBalanceView walletTopUp(UUID userId, UUID staffUserId, long amountCents, String reason,
+                                  String stepUpToken);
 
     /**
      * entitlements {@code PATCH /internal/admin/users/{userId}} — set the {@code is_platform_admin}
@@ -259,6 +262,21 @@ public interface DownstreamClient {
      * must not look like nothing is unrecovered.
      */
     UnrecoveredPaymentsView listUnrecoveredPayments(int limit);
+
+    /**
+     * billing {@code GET /internal/admin/alerts?status=&limit=} — money alerts, {@code OPEN}
+     * (newest first) or {@code ACKNOWLEDGED} (newest close first). Envelope, never a bare list:
+     * billing dark must not look like nothing is wrong.
+     */
+    MoneyAlertQueueView listMoneyAlerts(String status, int limit);
+
+    /**
+     * billing {@code POST /internal/admin/alerts/{id}/acknowledge} — close one alert with a note.
+     * Moves no money, so it is not step-up gated. Billing keeps the FIRST acknowledgement: a second
+     * one returns the row unchanged. Throws {@link DownstreamCallException} when billing refuses or
+     * cannot be reached.
+     */
+    MoneyAlertEntry acknowledgeMoneyAlert(UUID alertId, UUID staffUserId, String note);
 
     /** billing {@code GET /internal/admin/wallet/summary/global} — platform-wide money picture. */
     GlobalWalletSummaryView walletSummaryGlobal();

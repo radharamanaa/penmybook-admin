@@ -1,6 +1,7 @@
 package dev.bookforge.adminapi.downstream;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.bookforge.adminapi.config.MeshKeys;
 import dev.bookforge.adminapi.config.ServiceJwtProperties;
 import org.springframework.stereotype.Component;
 
@@ -16,7 +17,8 @@ import java.util.Map;
  * Mints the short-lived HS256 service-account JWT that authenticates every outbound
  * {@code /internal/*} call. Claims per contract: {@code iss=bookforge-internal},
  * {@code aud=<callee>}, {@code exp=now+5min}, {@code scope=internal}. The {@code aud} must match
- * the callee, so a token is minted per target service.
+ * the callee, so a token is minted per target service. H1: signed with admin-api's own
+ * MESH_KEY_ADMIN_API once set, else the shared key (docs/security/mesh-keys.md).
  */
 @Component
 public class ServiceAccountTokenFactory {
@@ -27,12 +29,14 @@ public class ServiceAccountTokenFactory {
 
     private final ServiceJwtProperties properties;
     private final ObjectMapper objectMapper;
+    private final byte[] signingKey;
 
     public ServiceAccountTokenFactory(ServiceJwtProperties properties, ObjectMapper objectMapper) {
-        int keyLen = properties.signingKey().getBytes(StandardCharsets.UTF_8).length;
+        MeshKeys meshKeys = properties.meshKeys();
+        int keyLen = meshKeys.signingKey().length;
         if (keyLen < HS256_MIN_KEY_BYTES) {
             throw new IllegalStateException(
-                    "SERVICE_JWT_SIGNING_KEY must be at least "
+                    "SERVICE_JWT_SIGNING_KEY (or MESH_KEY_ADMIN_API) must be at least "
                             + HS256_MIN_KEY_BYTES
                             + " bytes (256 bits) for HS256; got "
                             + keyLen
@@ -40,6 +44,7 @@ public class ServiceAccountTokenFactory {
         }
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.signingKey = meshKeys.signingKey();
     }
 
     /** Matches InternalController.ADMIN_API_SUBJECT in entitlements. */
@@ -74,7 +79,7 @@ public class ServiceAccountTokenFactory {
 
     private byte[] sign(String signingInput) throws Exception {
         Mac mac = Mac.getInstance("HmacSHA256");
-        mac.init(new SecretKeySpec(properties.signingKey().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        mac.init(new SecretKeySpec(signingKey, "HmacSHA256"));
         return mac.doFinal(signingInput.getBytes(StandardCharsets.UTF_8));
     }
 }

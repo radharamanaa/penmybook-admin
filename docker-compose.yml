@@ -51,6 +51,10 @@ services:
       ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-}
       ADMIN_BOOTSTRAP_PASSWORD_HASH: ${ADMIN_BOOTSTRAP_PASSWORD_HASH:-}
       SERVICE_JWT_SIGNING_KEY: ${SERVICE_JWT_SIGNING_KEY:-integration-suite-hs256-shared-key-32+bytes}
+      # H1: book_admin's own mesh key (SSM auth/MESH_KEY_BOOK_ADMIN). Unset/REPLACE_ME = shared key.
+      MESH_KEY_BOOK_ADMIN: ${MESH_KEY_BOOK_ADMIN:-}
+      # S3/S4: local only — the prod override sets false, and then a dev key stops the service.
+      DEV_MODE: ${ADMIN_DEV_MODE:-true}
       CURATOR_INTERNAL_URL: ${CURATOR_INTERNAL_URL:-http://host.docker.internal:8000}
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -62,6 +66,10 @@ services:
       SERVER_PORT: 8104
       ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET:-dev-insecure-admin-secret-change-me-32b!}
       SERVICE_JWT_SIGNING_KEY: ${SERVICE_JWT_SIGNING_KEY:-integration-suite-hs256-shared-key-32+bytes}
+      # H1: admin-api's own mesh key (SSM auth/MESH_KEY_ADMIN_API). Unset/REPLACE_ME = shared key.
+      MESH_KEY_ADMIN_API: ${MESH_KEY_ADMIN_API:-}
+      # S3/S4: local only — the prod override sets `prod`, and then a dev key stops the service.
+      SPRING_PROFILES_ACTIVE: ${ADMIN_SPRING_PROFILES_ACTIVE:-dev}
       # host.docker.internal must use the HOST-published ports (18101/18102/18103),
       # not the services' internal container ports (8101/8102/8103) — the main app
       # publishes entitlements/billing/org on the 1810x host ports (docker-compose.yml).

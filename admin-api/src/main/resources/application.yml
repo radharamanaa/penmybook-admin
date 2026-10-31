@@ -28,6 +28,10 @@ service-jwt:
   signing-key: ${SERVICE_JWT_SIGNING_KEY:dev-only-hs256-shared-secret-change-me}
   issuer: ${SERVICE_JWT_ISSUER:bookforge-internal}
   audience: ${SERVICE_JWT_AUDIENCE:admin-api}
+  # H1 (docs/security/mesh-keys.md): admin-api's own mesh signing key. Unset or REPLACE_ME = sign
+  # with the shared signing-key above (today's behaviour). admin-api receives no mesh tokens.
+  caller: admin_api
+  own-key: ${MESH_KEY_ADMIN_API:}
 
 # Inbound admin-login JWT (minted by book_admin; decision log D4/D16). The secret is
 # DELIBERATELY distinct from service-jwt.signing-key — defaults match book_admin's dev values.

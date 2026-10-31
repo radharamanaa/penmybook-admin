@@ -35,6 +35,11 @@ public class AdminWireMock {
     /** The payment id the canonical unrecovered-payments stub reports. */
     public static final String UNRECOVERED_PAYMENT_ID = "6f1c2a9e-3b7d-4e21-9a55-0c8d4f2b7e10";
 
+    /** The open money alerts billing reports (newest first), and the one closed alert. */
+    public static final String OPEN_WARNING_ALERT_ID = "0a1b2c3d-0000-4000-8000-000000000001";
+    public static final String OPEN_CRITICAL_ALERT_ID = "0a1b2c3d-0000-4000-8000-000000000002";
+    public static final String CLOSED_ALERT_ID = "0a1b2c3d-0000-4000-8000-000000000003";
+
     private static WireMockServer server;
 
     /** Exposed so that test steps can call {@code .verify()/.stubFor()/.resetAll()} on the same instance. */
@@ -75,6 +80,7 @@ public class AdminWireMock {
         stubBillingWalletCredit();
         stubBillingPaymentsHealth();
         stubBillingUnrecoveredPayments();
+        stubBillingMoneyAlerts();
         stubEntitlementsSetPlatformAdmin();
         stubEntitlementsUserSearch();
         stubEntitlementsUsersByIds();
@@ -190,6 +196,45 @@ public class AdminWireMock {
                                 + "\"providerPaymentRef\":\"pi_unrecovered\",\"status\":\"CHARGED_BACK\","
                                 + "\"grossAmountCents\":2500,\"unrecoveredCents\":300,"
                                 + "\"updatedAt\":\"2026-10-20T12:00:00Z\"}]")));
+    }
+
+    /** billing {@code GET /internal/admin/alerts} — two open alerts and one closed one. */
+    private static void stubBillingMoneyAlerts() {
+        server.stubFor(get(urlPathEqualTo("/internal/admin/alerts"))
+                .withQueryParam("status", com.github.tomakehurst.wiremock.client.WireMock.equalTo("OPEN"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("[" + moneyAlertJson(OPEN_WARNING_ALERT_ID, "WARNING",
+                                        "2026-10-30T12:00:00Z", null, null, null) + ","
+                                + moneyAlertJson(OPEN_CRITICAL_ALERT_ID, "CRITICAL",
+                                        "2026-10-30T11:00:00Z", null, null, null) + "]")));
+        server.stubFor(get(urlPathEqualTo("/internal/admin/alerts"))
+                .withQueryParam("status", com.github.tomakehurst.wiremock.client.WireMock.equalTo("ACKNOWLEDGED"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("[" + moneyAlertJson(CLOSED_ALERT_ID, "CRITICAL",
+                                "2026-10-30T13:00:00Z", "2026-10-30T13:30:00Z",
+                                UUID.randomUUID().toString(), "handled") + "]")));
+    }
+
+    /** One billing {@code AdminAlertView} row; null acknowledgement fields mean the alert is open. */
+    public static String moneyAlertJson(String id, String severity, String createdAt,
+                                        String acknowledgedAt, String acknowledgedBy, String note) {
+        return "{\"id\":\"" + id + "\",\"alertType\":\"REFUND_HEAL_SHORTFALL\","
+                + "\"severity\":\"" + severity + "\",\"subject\":\"Refund shortfall\","
+                + "\"body\":\"The wallet could not cover the refund.\",\"ownerType\":\"USER\","
+                + "\"ownerId\":\"" + UUID.randomUUID() + "\",\"paymentId\":null,"
+                + "\"createdAt\":\"" + createdAt + "\",\"emailedAt\":null,"
+                + "\"emailError\":\"not sent\","
+                + "\"acknowledgedAt\":" + quotedOrNull(acknowledgedAt) + ","
+                + "\"acknowledgedBy\":" + quotedOrNull(acknowledgedBy) + ","
+                + "\"resolutionNote\":" + quotedOrNull(note) + "}";
+    }
+
+    private static String quotedOrNull(String value) {
+        return value == null ? "null" : "\"" + value + "\"";
     }
 
     /** billing {@code GET /internal/admin/payments/health} — payment-integration health relay. */

@@ -134,14 +134,17 @@ export const api = {
   // outlast it. The default 12s abort read as "failed" while the card refund still landed.
   // `retryOfUnknownOutcome`: the same token resent after an attempt that may have gone through.
   // It is not hashed; admin-api only uses it to say what a refused approval means.
+  // `freezeAccount` ("Also freeze this account") IS hashed, and only when true: it must match the
+  // params the OTP was started with, or the approval is refused.
   refund: (userId, paymentId, amountCents, reason, stepUpToken, refundRequestId,
-           retryOfUnknownOutcome = false) =>
+           retryOfUnknownOutcome = false, freezeAccount = false) =>
     request(`/api/v1/admin/users/${userId}/refund`, {
       method: 'POST',
       body: {
         paymentId, amountCents, reason,
         ...(refundRequestId ? { refundRequestId } : {}),
         ...(retryOfUnknownOutcome ? { retryOfUnknownOutcome: true } : {}),
+        ...(freezeAccount ? { freezeAccount: true } : {}),
       },
       headers: { 'X-Step-Up-Token': stepUpToken },
       timeoutMs: 65_000,
@@ -196,6 +199,14 @@ export const api = {
       headers: { 'X-Step-Up-Token': stepUpToken },
     }),
   unrecoveredPayments: () => request('/api/v1/admin/payments/unrecovered'),
+  // ── money alerts (admin-api → billing). status OPEN | ALL; severity null = any.
+  moneyAlerts: (status = 'OPEN', severity = null, limit = 100) => {
+    const qs = new URLSearchParams({ status, limit: String(limit) })
+    if (severity) qs.set('severity', severity)
+    return request(`/api/v1/admin/alerts?${qs}`)
+  },
+  acknowledgeMoneyAlert: (id, note) =>
+    request(`/api/v1/admin/alerts/${id}/acknowledge`, { method: 'POST', body: { note } }),
   // ── pricing (admin-api → entitlements) ──
   getPricing: () => request('/api/v1/admin/pricing'),
   upsertGlobalPricing: (action, valueCents, category = null) =>

@@ -30,6 +30,9 @@ import dev.bookforge.adminapi.dto.OrgPricingRuleView;
 import dev.bookforge.adminapi.dto.OwnerSpendOverview;
 import dev.bookforge.adminapi.dto.PaymentHealthView;
 import dev.bookforge.adminapi.dto.PlatformAdminUpdateView;
+import dev.bookforge.adminapi.dto.AcknowledgeAlertBody;
+import dev.bookforge.adminapi.dto.MoneyAlertEntry;
+import dev.bookforge.adminapi.downstream.DownstreamCallException;
 import dev.bookforge.adminapi.dto.ForceResolveReversedBody;
 import dev.bookforge.adminapi.dto.ForceResolveReversedView;
 import dev.bookforge.adminapi.dto.RefundReceiptView;
@@ -41,6 +44,7 @@ import dev.bookforge.adminapi.dto.WalletBalanceView;
 import dev.bookforge.adminapi.dto.WalletTopUpRequest;
 import dev.bookforge.adminapi.service.AdminOtpService;
 import dev.bookforge.adminapi.service.AdminService;
+import dev.bookforge.adminapi.service.MoneyAlertService;
 import dev.bookforge.adminapi.service.SpendOverviewService;
 import dev.bookforge.adminapi.service.audit.AuditEventWriter;
 import jakarta.servlet.http.HttpServletRequest;
@@ -91,6 +95,10 @@ import java.util.UUID;
 @RequestMapping("/v1/admin")
 public class AdminController {
 
+    private static final String IP_OCTET = "(25[0-5]|2[0-4]\\d|1?\\d?\\d)";
+    private static final java.util.regex.Pattern IP_LITERAL =
+            java.util.regex.Pattern.compile("^(" + IP_OCTET + "(\\." + IP_OCTET + "){3}|[0-9a-fA-F:]*:[0-9a-fA-F:.]*)$");
+
     // ───────── Audit action labels (LOCKED — match V00X__create_audit_log.sql action enum) ─────────
     private static final String ACTION_WALLET_TOPUP = "WALLET_TOPUP";
     private static final String ACTION_REFUND = "REFUND";
@@ -106,12 +114,14 @@ public class AdminController {
     private static final String ACTION_UPSERT_GLOBAL_PRICING = "UPSERT_GLOBAL_PRICING";
     private static final String ACTION_ACCOUNT_REACTIVATE = "ACCOUNT_REACTIVATE";
     private static final String ACTION_WALLET_UNFREEZE = "WALLET_UNFREEZE";
+    private static final String ACTION_MONEY_ALERT_ACKNOWLEDGE = "MONEY_ALERT_ACKNOWLEDGE";
 
     private static final String RESOURCE_USER = "USER";
     private static final String RESOURCE_PAYMENT = "PAYMENT";
     private static final String RESOURCE_REFUND_REQUEST = "REFUND_REQUEST";
     private static final String RESOURCE_ORG = "ORG";
     private static final String RESOURCE_PRICING = "PRICING";
+    private static final String RESOURCE_MONEY_ALERT = "MONEY_ALERT";
 
     /** Phase-4 TODO marker — returned in the 501 body so the SPA can render a sane fallback. */
     private static final Map<String, String> PHASE_4_PENDING = Map.of(
@@ -124,6 +134,8 @@ public class AdminController {
     private static final String STEP_UP_ACTION_GRANT_CREDIT = "grant_credit";
     /** Action name the step-up token must be bound to for a refund (B3). */
     private static final String STEP_UP_ACTION_REFUND = "refund";
+    /** Refund param: staff chose to freeze the account too. Hashed (and sent) only when true. */
+    private static final String PARAM_FREEZE_ACCOUNT = "freezeAccount";
     /** Approving or rejecting a user-submitted refund request. */
     private static final String STEP_UP_ACTION_RESOLVE_REFUND_REQUEST = "resolve_refund_request";
     /** Action name the step-up token must be bound to for an admin wallet top-up (H3). */
@@ -197,21 +209,29 @@ public class AdminController {
     private static final int REFUND_QUEUE_MAX_LIMIT = 100;
     /** Billing's ceiling for one page of the unrecovered-payments list. */
     private static final int UNRECOVERED_PAYMENTS_LIMIT = 200;
+    private static final Set<String> MONEY_ALERT_FILTERS =
+            Set.of(MoneyAlertService.FILTER_OPEN, MoneyAlertService.FILTER_ALL);
+    /** Billing's {@code AlertSeverity} values. */
+    private static final Set<String> MONEY_ALERT_SEVERITIES = Set.of("CRITICAL", "WARNING");
+    private static final int MONEY_ALERT_MAX_LIMIT = MoneyAlertService.BILLING_PAGE;
 
     private final DownstreamClient downstream;
     private final AuditEventWriter auditEventWriter;
     private final AdminService adminService;
     private final AdminOtpService adminOtpService;
     private final SpendOverviewService spendOverviewService;
+    private final MoneyAlertService moneyAlertService;
 
     public AdminController(DownstreamClient downstream, AuditEventWriter auditEventWriter,
                            AdminService adminService, AdminOtpService adminOtpService,
-                           SpendOverviewService spendOverviewService) {
+                           SpendOverviewService spendOverviewService,
+                           MoneyAlertService moneyAlertService) {
         this.downstream = downstream;
         this.auditEventWriter = auditEventWriter;
         this.adminService = adminService;
         this.adminOtpService = adminOtpService;
         this.spendOverviewService = spendOverviewService;
+        this.moneyAlertService = moneyAlertService;
     }
 
     // ───────── 0. Admin step-up OTP (F2) ─────────
@@ -489,6 +509,71 @@ public class AdminController {
         return ResponseEntity.ok(downstream.listUnrecoveredPayments(UNRECOVERED_PAYMENTS_LIMIT));
     }
 
+    /**
+     * The staff Money alerts list: {@code status=OPEN} (default) or {@code ALL} (open and closed,
+     * newest raised first), optionally one {@code severity}. A READ: no step-up, no audit row.
+     * Envelope, never a bare list, so a billing outage cannot look like nothing is wrong.
+     */
+    @GetMapping("/alerts")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<Object> listMoneyAlerts(
+            @RequestParam(name = "status", defaultValue = "OPEN") String status,
+            @RequestParam(name = "severity", required = false) String severity,
+            @RequestParam(name = "limit", defaultValue = "50") int limit) {
+        if (!MONEY_ALERT_FILTERS.contains(status)) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "invalid_status", "code", "INVALID_STATUS", "status", status));
+        }
+        if (severity != null && !MONEY_ALERT_SEVERITIES.contains(severity)) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "invalid_severity", "code", "INVALID_SEVERITY", "severity", severity));
+        }
+        if (limit < 1 || limit > MONEY_ALERT_MAX_LIMIT) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "invalid_limit", "code", "INVALID_LIMIT", "limit", limit));
+        }
+        return ResponseEntity.ok(moneyAlertService.list(status, severity, limit));
+    }
+
+    /**
+     * Close one money alert with a note. Moves no money, so — like the waitlist admit — the admin
+     * login is the gate and there is no OTP. Billing keeps the first acknowledgement; only one this
+     * admin's call actually recorded is audited as ALLOW. Billing's refusals keep billing's status
+     * and message; an unreachable billing is a 502.
+     */
+    @PostMapping("/alerts/{alertId}/acknowledge")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<Object> acknowledgeMoneyAlert(@PathVariable UUID alertId,
+                                                        @Valid @RequestBody AcknowledgeAlertBody body,
+                                                        @AuthenticationPrincipal Jwt jwt,
+                                                        HttpServletRequest request) {
+        UUID actor = actorOf(jwt);
+        String note = body.note().trim();
+        MoneyAlertEntry alert;
+        try {
+            alert = downstream.acknowledgeMoneyAlert(alertId, actor, note);
+        } catch (DownstreamCallException e) {
+            if (e.status() >= 400 && e.status() < 500) {
+                return ResponseEntity.status(e.status()).body(Map.of(
+                        "error", "acknowledge_refused", "code", "ACKNOWLEDGE_REFUSED",
+                        "message", e.detail() == null ? "Billing refused to close this alert." : e.detail()));
+            }
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of(
+                    "error", "downstream_unconfirmed", "code", "DOWNSTREAM_UNCONFIRMED",
+                    "message", "Billing did not confirm. Refresh and check the alert."));
+        }
+        if (actor.equals(alert.acknowledgedBy()) && note.equals(alert.resolutionNote())) {
+            Map<String, Object> newValue = new LinkedHashMap<>();
+            newValue.put("alertType", alert.alertType());
+            newValue.put("severity", alert.severity());
+            newValue.put("note", note);
+            auditEventWriter.writeAllow(actor, ACTION_MONEY_ALERT_ACKNOWLEDGE, RESOURCE_MONEY_ALERT,
+                    alertId.toString(), Map.<String, Object>of("acknowledged", false), newValue,
+                    clientIp(request));
+        }
+        return ResponseEntity.ok(alert);
+    }
+
     @PostMapping("/users/{userId}/refund")
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ResponseEntity<Object> refund(@PathVariable UUID userId,
@@ -507,6 +592,11 @@ public class AdminController {
         params.put("refundAmountCents", body.amountCents());
         if (body.refundRequestId() != null) {
             params.put("refundRequestId", body.refundRequestId().toString());
+        }
+        // The freeze is part of what staff approved: hashed only when ticked, so a no-freeze token
+        // hashes exactly as before and cannot be replayed with a freeze (or the reverse).
+        if (body.shouldFreezeAccount()) {
+            params.put(PARAM_FREEZE_ACCOUNT, true);
         }
 
         AdminCommand command = new AdminCommand(actorOf(jwt), userId,
@@ -535,6 +625,7 @@ public class AdminController {
         if (body.refundRequestId() != null) {
             newValue.put("refundRequestId", body.refundRequestId().toString());
         }
+        newValue.put(PARAM_FREEZE_ACCOUNT, body.shouldFreezeAccount());
         // A replay moved no money; record it as one so it never reads as a second refund.
         auditEventWriter.writeAllow(actorOf(jwt),
                 outcome.idempotentReplay() ? ACTION_REFUND_REPLAY : ACTION_REFUND, RESOURCE_PAYMENT,
@@ -1314,6 +1405,19 @@ public class AdminController {
         }
     }
 
+    private static boolean isIpLiteral(String text) {
+        if (!IP_LITERAL.matcher(text).matches()) {
+            return false;
+        }
+        try {
+            // The pattern leaves only literals here, so this parses and never looks up a name.
+            java.net.InetAddress.getByName(text);
+            return true;
+        } catch (java.net.UnknownHostException invalid) {
+            return false;
+        }
+    }
+
     private String clientIp(HttpServletRequest request) {
         if (request == null) {
             return null;
@@ -1321,7 +1425,9 @@ public class AdminController {
         String forwarded = request.getHeader("X-Forwarded-For");
         if (forwarded != null && !forwarded.isBlank()) {
             int comma = forwarded.indexOf(',');
-            return comma == -1 ? forwarded.trim() : forwarded.substring(0, comma).trim();
+            String first = comma == -1 ? forwarded.trim() : forwarded.substring(0, comma).trim();
+            // Client-set text must never fail the audit row (the column is INET).
+            return isIpLiteral(first) ? first : request.getRemoteAddr();
         }
         return request.getRemoteAddr();
     }

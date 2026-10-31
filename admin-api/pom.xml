@@ -108,6 +108,17 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <!-- S3/S4: the startup guard (SigningKeyStartupGuard) refuses dev keys outside the
+                             `dev` profile; the suite runs on the dev defaults, so it runs as dev. -->
+                        <spring.profiles.active>dev</spring.profiles.active>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+            <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>0.8.12</version>

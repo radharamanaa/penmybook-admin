@@ -7,6 +7,7 @@ import dev.bookforge.adminapi.dto.RefundRequest;
 import dev.bookforge.adminapi.dto.RefundRequestQueueEntry;
 import dev.bookforge.adminapi.service.AdminOtpService;
 import dev.bookforge.adminapi.service.AdminService;
+import dev.bookforge.adminapi.service.MoneyAlertService;
 import dev.bookforge.adminapi.service.SpendOverviewService;
 import dev.bookforge.adminapi.service.audit.AuditEventWriter;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,7 +50,7 @@ class AdminControllerRefundMoneyTest {
     @BeforeEach
     void setUp() {
         controller = new AdminController(downstream, auditEventWriter, adminService,
-                adminOtpService, spendOverviewService);
+                adminOtpService, spendOverviewService, new MoneyAlertService(downstream));
         jwt = Jwt.withTokenValue("t").header("alg", "none").subject(staff.toString())
                 .issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(60)).build();
     }

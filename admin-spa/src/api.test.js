@@ -146,6 +146,15 @@ describe('api.js', () => {
       await expect(api.refund('u1', 'pay1', 500, 'admin refund', 'tok-abc'))
         .rejects.toMatchObject({ status: 0, body: { code: 'NETWORK_ERROR' } })
     })
+
+    // Q13: the freeze is hashed only when chosen, so the body carries it only then.
+    it('sends freezeAccount only when staff chose to freeze', async () => {
+      await api.refund('u1', 'pay1', 500, 'admin refund', 'tok-abc', null, false, true)
+      await api.refund('u1', 'pay1', 500, 'admin refund', 'tok-abc', null, false, false)
+      const [frozen, plain] = global.fetch.mock.calls.map(([, init]) => JSON.parse(init.body))
+      expect(frozen.freezeAccount).toBe(true)
+      expect(plain).not.toHaveProperty('freezeAccount')
+    })
   })
 
   describe('markRefundPaidByHand', () => {

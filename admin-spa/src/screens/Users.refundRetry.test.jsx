@@ -87,8 +87,8 @@ async function payOut() {
   await user.click(screen.getByRole('button', { name: /verify & execute/i }))
 }
 
-const firstSend = ['u1', PAYMENT_ID, 874, 'admin refund', TOKEN, REQUEST_ID, false]
-const retrySend = ['u1', PAYMENT_ID, 874, 'admin refund', TOKEN, REQUEST_ID, true]
+const firstSend = ['u1', PAYMENT_ID, 874, 'admin refund', TOKEN, REQUEST_ID, false, false]
+const retrySend = ['u1', PAYMENT_ID, 874, 'admin refund', TOKEN, REQUEST_ID, true, false]
 
 describe('Users payout: retry with the same approval', () => {
   beforeEach(() => {
