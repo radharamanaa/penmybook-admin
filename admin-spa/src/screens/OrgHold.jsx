@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
+import { useRevealOtp } from '../useRevealOtp.js'
+import { HoldNoteHint, HOLD_NOTE_MIN_LENGTH } from '../components/HoldNoteHint.jsx'
 import { api } from '../api.js'
 
-const HOLD_NOTE_MIN_LENGTH = 8
 
 function formatDollars(cents) {
   return `$${(cents / 100).toFixed(2)}`
@@ -17,6 +18,8 @@ export default function OrgHold() {
   const [state, setState] = useState(null)
   const [note, setNote] = useState('')
   const [otp, setOtp] = useState(null) // {challengeId, params, note}
+  const otpRowRef = useRef(null)
+  useRevealOtp(otpRowRef, otp)
   const [code, setCode] = useState('')
   const [ok, setOk] = useState(null)
   const [error, setError] = useState(null)
@@ -89,6 +92,7 @@ export default function OrgHold() {
               <label htmlFor="org-hold-note">Why are you lifting the hold?</label>
               <input id="org-hold-note" value={note} onChange={(e) => setNote(e.target.value)}
                      placeholder="e.g. dispute du_… won in Stripe" />
+              <HoldNoteHint note={note} />
             </div>
             <button disabled={!noteReady} onClick={startOtp}>Start OTP unfreeze org wallet</button>
           </div>
@@ -96,7 +100,7 @@ export default function OrgHold() {
       )}
 
       {otp && (
-        <div className="row" style={{ marginTop: 14 }}>
+        <div ref={otpRowRef} className="row" style={{ marginTop: 14 }}>
           <div>
             <label htmlFor="org-hold-otp">OTP code for <code>wallet_unfreeze</code> (check email / dev DB)</label>
             <input id="org-hold-otp" inputMode="numeric" autoComplete="one-time-code" value={code}

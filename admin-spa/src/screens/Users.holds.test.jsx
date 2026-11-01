@@ -151,6 +151,50 @@ describe('Users — lifting a chargeback or review hold (F3)', () => {
     expect(screen.queryByRole('button', { name: /unfreeze wallet/i })).not.toBeInTheDocument()
   })
 
+  it('says how long the note must be until it is long enough', async () => {
+    await manage()
+    await screen.findByLabelText(/Why are you lifting the hold/)
+    expect(screen.getByText('At least 8 characters (0/8)')).toBeTruthy()
+    await userEvent.type(screen.getByLabelText(/Why are you lifting the hold/), 'won it')
+    expect(screen.getByText('At least 8 characters (6/8)')).toBeTruthy()
+    await userEvent.type(screen.getByLabelText(/Why are you lifting the hold/), ' in Stripe')
+    expect(screen.queryByText(/At least 8 characters/)).toBeNull()
+  })
+
+  it('brings the code box into view with the cursor in it on a desktop too', async () => {
+    const scrolled = vi.fn()
+    Element.prototype.scrollIntoView = scrolled
+    await manage()
+    await userEvent.type(await screen.findByLabelText(/Why are you lifting the hold/), 'dispute won')
+    await userEvent.click(screen.getByRole('button', { name: /Start OTP reactivate account/ }))
+    const code = await screen.findByLabelText(/OTP code/)
+    expect(scrolled).toHaveBeenCalled()
+    expect(document.activeElement).toBe(code)
+  })
+
+  it('shows the new status in the list after a reactivation', async () => {
+    await manage()
+    await userEvent.type(await screen.findByLabelText(/Why are you lifting the hold/), 'dispute won')
+    await userEvent.click(screen.getByRole('button', { name: /Start OTP reactivate account/ }))
+    await userEvent.type(await screen.findByLabelText(/OTP code/), '123456')
+    searchUsers.mockResolvedValue([{ userId: 'u1', email: 'a@b.co', accountStatus: 'ACTIVE' }])
+    await userEvent.click(screen.getByRole('button', { name: 'Verify & execute' }))
+    expect(await screen.findByText('active')).toBeTruthy()
+    expect(screen.getByText(/is ACTIVE again/)).toBeTruthy()
+  })
+
+  it('refreshes the search that was run, not what the box holds now', async () => {
+    await manage()
+    await userEvent.type(await screen.findByLabelText(/Why are you lifting the hold/), 'dispute won')
+    await userEvent.click(screen.getByRole('button', { name: /Start OTP reactivate account/ }))
+    await userEvent.type(screen.getByLabelText(/email contains/i), 'zzz')
+    await userEvent.type(await screen.findByLabelText(/OTP code/), '123456')
+    searchUsers.mockClear()
+    await userEvent.click(screen.getByRole('button', { name: 'Verify & execute' }))
+    await screen.findByText(/is ACTIVE again/)
+    expect(searchUsers).toHaveBeenCalledWith('a@')
+  })
+
   it('does not crash when the account status is unknown', async () => {
     accountState.mockResolvedValue({ ...HELD, accountStatus: null })
     await manage()

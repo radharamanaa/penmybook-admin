@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api.js'
 import { useScrollIntoViewOnPhone } from '../useScrollIntoViewOnPhone.js'
+import { useRevealOtp } from '../useRevealOtp.js'
+import { HoldNoteHint, HOLD_NOTE_MIN_LENGTH } from '../components/HoldNoteHint.jsx'
 import OrgHold from './OrgHold.jsx'
 import {
   REFUND_REASON, RefundRetryPanel, classifyRefundFailure, pendingRefundRetry,
@@ -29,6 +31,7 @@ export default function Users() {
 
   const [query, setQuery] = useState(linkedEmail)
   const [results, setResults] = useState([])
+  const searchedQuery = useRef(linkedEmail) // what the list shows, not what the box holds now
   const [selected, setSelected] = useState(() => (
     linkedOwnerId && !orgPayoutUnwired
       ? { userId: linkedOwnerId, email: linkedEmail || linkedOwnerId, accountStatus: 'ACTIVE' }
@@ -55,8 +58,22 @@ export default function Users() {
     setError(null)
     try {
       setResults(await api.searchUsers(query))
+      searchedQuery.current = query
     } catch (err) {
       setError(err.message)
+    }
+  }
+
+  // After an action: the list and the open panel show the account as it is now. The action's own
+  // result stays on screen even if this read fails.
+  async function refreshResults() {
+    if (results.length === 0) return
+    try {
+      const fresh = await api.searchUsers(searchedQuery.current)
+      setResults(fresh)
+      setSelected((open) => fresh.find((u) => u.userId === open?.userId) ?? open)
+    } catch {
+      // the list stays as it was; a new search reads it again
     }
   }
 
@@ -142,7 +159,7 @@ export default function Users() {
                        initialRefundCents={linkedAmountCents}
                        initialRefundRequestId={linkedRequestId}
                        refundRequestIdReadOnly={Boolean(linkedRequestId)}
-                       onDone={(msg) => showResult(msg, null)}
+                       onDone={(msg) => { showResult(msg, null); refreshResults() }}
                        onError={(msg) => showResult(null, msg)} />
         </div>
       )}
@@ -151,7 +168,6 @@ export default function Users() {
 }
 
 const SUSPENDED_STATUSES = new Set(['SUSPENDED', 'SUSPENDED_FOR_REVIEW'])
-const HOLD_NOTE_MIN_LENGTH = 8
 // Why a SUSPENDED_FOR_REVIEW account is held, so staff never lift a content review believing it
 // was a payment hold.
 const HOLD_KIND_LABELS = {
@@ -233,6 +249,7 @@ function HoldPanel({ state, note, onNoteChange, onReactivate, onUnfreeze, resetS
           <label htmlFor="hold-note">Why are you lifting the hold?</label>
           <input id="hold-note" value={note} onChange={(e) => onNoteChange(e.target.value)}
                  placeholder="e.g. dispute du_… won in Stripe" />
+          <HoldNoteHint note={note} />
         </div>
         {suspended && (
           <label className="row" style={{ alignItems: 'center', gap: 6 }}>
@@ -274,7 +291,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
   const [otp, setOtp] = useState(null) // {action, challengeId, params, note}
   const [code, setCode] = useState('')
   const otpRowRef = useRef(null)
-  useScrollIntoViewOnPhone(otpRowRef, otp)
+  useRevealOtp(otpRowRef, otp)
   const [holdState, setHoldState] = useState(null)
   const [holdError, setHoldError] = useState(null)
   const [holdNote, setHoldNote] = useState('')

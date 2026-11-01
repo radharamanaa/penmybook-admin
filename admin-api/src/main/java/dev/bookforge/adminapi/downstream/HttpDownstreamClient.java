@@ -133,7 +133,9 @@ public class HttpDownstreamClient implements DownstreamClient {
         this.downstream = downstream;
         this.tokenFactory = tokenFactory;
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder().connectTimeout(ADMIN_RPC_TIMEOUT).build();
+        // HTTP/1.1: the default asks plain-HTTP servers to upgrade to HTTP/2, and uvicorn answers a POST with 400.
+        this.httpClient = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(ADMIN_RPC_TIMEOUT).build();
         this.refundPayoutTimeout = refundPayoutTimeout;
     }
 
