@@ -115,7 +115,8 @@ public class AdminSteps {
     @When("the admin suspends a user with a valid step-up token")
     public void suspends() {
         Map<String, Object> params = Map.of();
-        lastResult = adminService.suspend(cmd("suspend", boundToken("suspend", params), params));
+        AdminService.SuspendOutcome outcome = adminService.suspend(cmd("suspend", boundToken("suspend", params), params));
+        lastResult = new AdminActionResult(outcome.success(), outcome.auditEntryId(), outcome.rejectionReason());
     }
 
     @When("the admin refunds a payment with a valid step-up token")

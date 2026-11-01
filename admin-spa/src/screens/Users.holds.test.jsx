@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 
@@ -8,6 +8,7 @@ const otpVerify = vi.hoisted(() => vi.fn())
 const searchUsers = vi.hoisted(() => vi.fn())
 const accountState = vi.hoisted(() => vi.fn())
 const unsuspend = vi.hoisted(() => vi.fn())
+const suspend = vi.hoisted(() => vi.fn())
 const unfreezeWallet = vi.hoisted(() => vi.fn())
 const refund = vi.hoisted(() => vi.fn())
 const setPlatformAdmin = vi.hoisted(() => vi.fn())
@@ -19,6 +20,7 @@ vi.mock('../api.js', () => ({
     otpVerify: (...a) => otpVerify(...a),
     accountState: (...a) => accountState(...a),
     unsuspend: (...a) => unsuspend(...a),
+    suspend: (...a) => suspend(...a),
     unfreezeWallet: (...a) => unfreezeWallet(...a),
     refund: (...a) => refund(...a),
     setPlatformAdmin: (...a) => setPlatformAdmin(...a),
@@ -51,7 +53,7 @@ async function manage() {
 
 describe('Users — lifting a chargeback or review hold (F3)', () => {
   beforeEach(() => {
-    for (const fn of [otpStart, otpVerify, searchUsers, accountState, unsuspend, unfreezeWallet, refund,
+    for (const fn of [otpStart, otpVerify, searchUsers, accountState, unsuspend, suspend, unfreezeWallet, refund,
       setPlatformAdmin]) {
       fn.mockReset()
     }
@@ -154,11 +156,11 @@ describe('Users — lifting a chargeback or review hold (F3)', () => {
   it('says how long the note must be until it is long enough', async () => {
     await manage()
     await screen.findByLabelText(/Why are you lifting the hold/)
-    expect(screen.getByText('At least 8 characters (0/8)')).toBeTruthy()
+    expect(screen.getAllByText('At least 8 characters (0/8)')).toHaveLength(2) // lift and suspend
     await userEvent.type(screen.getByLabelText(/Why are you lifting the hold/), 'won it')
     expect(screen.getByText('At least 8 characters (6/8)')).toBeTruthy()
     await userEvent.type(screen.getByLabelText(/Why are you lifting the hold/), ' in Stripe')
-    expect(screen.queryByText(/At least 8 characters/)).toBeNull()
+    expect(screen.getAllByText(/At least 8 characters/)).toHaveLength(1) // only suspend's is left
   })
 
   it('brings the code box into view with the cursor in it on a desktop too', async () => {
@@ -193,6 +195,76 @@ describe('Users — lifting a chargeback or review hold (F3)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Verify & execute' }))
     await screen.findByText(/is ACTIVE again/)
     expect(searchUsers).toHaveBeenCalledWith('a@')
+  })
+
+  describe('suspending an account', () => {
+    const ACTIVE = { userId: 'u1', accountStatus: 'ACTIVE', walletExists: true, balanceCents: 0, walletFrozen: false }
+    const NOTE = 'abuse report 123'
+
+    async function startSuspend() {
+      accountState.mockResolvedValue(ACTIVE)
+      await manage()
+      const start = await screen.findByRole('button', { name: /start otp suspend account/i })
+      expect(start).toBeDisabled()
+      await userEvent.type(screen.getByLabelText(/why are you suspending/i), NOTE)
+      await userEvent.click(start)
+      await userEvent.type(await screen.findByLabelText(/otp code/i), '123456')
+    }
+
+    it('suspends with a note, binding no params into the OTP, and shows the hold afterwards', async () => {
+      suspend.mockResolvedValue({ userId: 'u1', accountStatus: 'SUSPENDED' })
+      await startSuspend()
+      expect(otpStart).toHaveBeenCalledWith('suspend', 'u1', {})
+      accountState.mockResolvedValue({ ...ACTIVE, accountStatus: 'SUSPENDED' })
+      await userEvent.click(screen.getByRole('button', { name: /verify & execute/i }))
+      expect(suspend).toHaveBeenCalledWith('u1', NOTE, 'tok-abc')
+      expect(await screen.findByText('a@b.co is suspended.')).toBeInTheDocument()
+      expect(await screen.findByRole('button', { name: /start otp reactivate account/i })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /start otp suspend account/i })).toBeNull()
+    })
+
+    it('says why an account cannot be suspended', async () => {
+      suspend.mockRejectedValue(Object.assign(new Error('Request failed'), {
+        status: 409, body: { code: 'NOT_SUSPENDABLE', accountStatus: 'BANNED' },
+      }))
+      await startSuspend()
+      await userEvent.click(screen.getByRole('button', { name: /verify & execute/i }))
+      expect(await screen.findByText(/a@b\.co was not suspended: the account is banned/i)).toBeInTheDocument()
+    })
+
+    it.each([
+      ['step_up_invalid', /code was not accepted/i],
+      ['DOWNSTREAM_REJECTED', /may not be suspended/i],
+    ])('explains a %s failure and closes the spent code', async (code, words) => {
+      suspend.mockRejectedValue(Object.assign(new Error('{"code":"x"}'), { status: 403, body: { code } }))
+      await startSuspend()
+      await userEvent.click(screen.getByRole('button', { name: /verify & execute/i }))
+      expect(await screen.findByText(words)).toBeInTheDocument()
+      expect(screen.queryByLabelText(/otp code/i)).toBeNull()
+    })
+
+    it('offers suspension on an account under review', async () => {
+      await manage()
+      expect(await screen.findByRole('button', { name: /start otp suspend account/i })).toBeInTheDocument()
+    })
+
+    it.each([['SUSPENDED'], ['PURGED']])('offers nothing on a %s account', async (accountStatus) => {
+      accountState.mockResolvedValue({ ...ACTIVE, accountStatus })
+      await manage()
+      await waitFor(() => expect(accountState).toHaveBeenCalled())
+      await new Promise((resolve) => { setTimeout(resolve, 0) })
+      expect(screen.queryByRole('button', { name: /start otp suspend account/i })).toBeNull()
+      expect(screen.queryByText(/cannot be suspended/)).toBeNull()
+    })
+
+    it.each([['BANNED', 'banned'], ['WAITLISTED', 'waitlisted'], ['SOFT_DELETED', 'soft deleted']])(
+      'says a %s account cannot be suspended, with no OTP to spend', async (accountStatus, words) => {
+        accountState.mockResolvedValue({ ...ACTIVE, accountStatus })
+        await manage()
+        expect(await screen.findByText(`This account is ${words}, so it cannot be suspended.`)).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: /start otp suspend account/i })).toBeNull()
+      },
+    )
   })
 
   it('does not crash when the account status is unknown', async () => {

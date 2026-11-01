@@ -13,6 +13,8 @@ import dev.bookforge.adminapi.dto.AccountHoldReleaseBody;
 import dev.bookforge.adminapi.dto.AccountReactivateBody;
 import dev.bookforge.adminapi.dto.AccountReactivatedView;
 import dev.bookforge.adminapi.dto.AccountStateView;
+import dev.bookforge.adminapi.dto.AccountSuspendBody;
+import dev.bookforge.adminapi.dto.AccountSuspendedView;
 import dev.bookforge.adminapi.dto.AdminActionResult;
 import dev.bookforge.adminapi.dto.AdminCommand;
 import dev.bookforge.adminapi.dto.WalletUnfrozenView;
@@ -113,6 +115,7 @@ public class AdminController {
     private static final String ACTION_UPSERT_ORG_PRICING = "UPSERT_ORG_PRICING";
     private static final String ACTION_UPSERT_GLOBAL_PRICING = "UPSERT_GLOBAL_PRICING";
     private static final String ACTION_ACCOUNT_REACTIVATE = "ACCOUNT_REACTIVATE";
+    private static final String ACTION_ACCOUNT_SUSPEND = "ACCOUNT_SUSPEND";
     private static final String ACTION_WALLET_UNFREEZE = "WALLET_UNFREEZE";
     private static final String ACTION_MONEY_ALERT_ACKNOWLEDGE = "MONEY_ALERT_ACKNOWLEDGE";
 
@@ -142,6 +145,8 @@ public class AdminController {
     private static final String STEP_UP_ACTION_WALLET_TOP_UP = "wallet_top_up";
     /** Reactivate a suspended account. Hash binds the target user only (no params). */
     private static final String STEP_UP_ACTION_UNSUSPEND = "unsuspend";
+    /** Suspend an account. Hash binds the target user only (no params). */
+    private static final String STEP_UP_ACTION_SUSPEND = "suspend";
     /** A successful reactivation that ends here lifted a staff or payment hold, but a content review stands (O-3). */
     private static final String ACCOUNT_STATUS_SUSPENDED_FOR_REVIEW = "SUSPENDED_FOR_REVIEW";
     /** Lift a wallet freeze. Hash is {ownerType, ownerId}; billing verifies and spends it. */
@@ -200,7 +205,7 @@ public class AdminController {
     /** Valid admin step-up actions an OTP challenge may be started for. */
     private static final Set<String> STEP_UP_ACTIONS =
             Set.of(STEP_UP_ACTION_GRANT_CREDIT, STEP_UP_ACTION_REFUND, STEP_UP_ACTION_WALLET_TOP_UP,
-                   STEP_UP_ACTION_RESOLVE_REFUND_REQUEST, STEP_UP_ACTION_UNSUSPEND,
+                   STEP_UP_ACTION_RESOLVE_REFUND_REQUEST, STEP_UP_ACTION_UNSUSPEND, STEP_UP_ACTION_SUSPEND,
                    STEP_UP_ACTION_WALLET_UNFREEZE, STEP_UP_ACTION_REFUND_MARK_PAID,
                    STEP_UP_ACTION_SET_PLATFORM_ADMIN);
 
@@ -930,6 +935,39 @@ public class AdminController {
         return ResponseEntity.ok(new AccountReactivatedView(userId, outcome.accountStatus(),
                 outcome.auditEntryId(), outcome.contentStrikesReset(), outcome.contentStrikesResetError(),
                 heldForContentReview));
+    }
+
+    /**
+     * Suspend an account. Step-up gated; the hash binds the target user only and the note lands in
+     * the audit row. Entitlements leaves a banned, waitlisted, soft-deleted or already suspended
+     * account as it is (a later reactivation would turn it ACTIVE), and the caller gets
+     * {@code 409 not_suspendable} with the status.
+     */
+    @PostMapping("/users/{userId}/suspend")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<Object> suspend(@PathVariable UUID userId,
+                                          @Valid @RequestBody AccountSuspendBody body,
+                                          @RequestHeader(value = STEP_UP_TOKEN_HEADER, required = false)
+                                          String stepUpToken,
+                                          @AuthenticationPrincipal Jwt jwt,
+                                          HttpServletRequest request) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        AdminCommand command = new AdminCommand(actorOf(jwt), userId, STEP_UP_ACTION_SUSPEND, stepUpToken, params);
+        AdminService.SuspendOutcome outcome = adminService.suspend(command);
+        if (!outcome.success() && outcome.rejectionReason() == null && outcome.accountStatus() != null) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "error", "not_suspendable", "code", "NOT_SUSPENDABLE",
+                    "accountStatus", outcome.accountStatus()));
+        }
+        if (!outcome.success()) {
+            return stepUpRejectionResponse(outcome.rejectionReason(), STEP_UP_ACTION_SUSPEND, params);
+        }
+        Map<String, Object> newValue = new LinkedHashMap<>();
+        newValue.put("accountStatus", outcome.accountStatus());
+        newValue.put("note", body.note());
+        auditEventWriter.writeAllow(actorOf(jwt), ACTION_ACCOUNT_SUSPEND, RESOURCE_USER,
+                userId.toString(), null, newValue, clientIp(request));
+        return ResponseEntity.ok(new AccountSuspendedView(userId, outcome.accountStatus(), outcome.auditEntryId()));
     }
 
     /**

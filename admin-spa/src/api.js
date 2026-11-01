@@ -158,6 +158,12 @@ export const api = {
       body: { note, acknowledgeWalletUnknown, resetContentStrikes },
       headers: { 'X-Step-Up-Token': stepUpToken },
     }),
+  suspend: (userId, note, stepUpToken) =>
+    request(`/api/v1/admin/users/${userId}/suspend`, {
+      method: 'POST',
+      body: { note },
+      headers: { 'X-Step-Up-Token': stepUpToken },
+    }),
   unfreezeWallet: (userId, note, stepUpToken) =>
     request(`/api/v1/admin/users/${userId}/wallet/unfreeze`, {
       method: 'POST',

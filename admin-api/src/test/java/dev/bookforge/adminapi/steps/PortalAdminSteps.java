@@ -359,6 +359,56 @@ public class PortalAdminSteps {
         lastResponse = sendGet("/v1/admin/users/" + TARGET_USER + "/account-state");
     }
 
+    @Given("entitlements reports the target user is {string} and cannot be suspended")
+    public void entitlementsRefusesSuspend(String status) {
+        AdminWireMock.server().stubFor(post(urlMatching("/internal/admin/suspend"))
+                .atPriority(1)
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"success\":false,\"auditEntryId\":null,\"accountStatus\":\"" + status + "\"}")));
+    }
+
+    @When("they suspend the target user with a valid step-up token")
+    public void suspendWithToken() {
+        suspend(boundToken("suspend", TARGET_USER, Map.of()));
+    }
+
+    @When("they suspend the target user without a step-up token")
+    public void suspendWithoutToken() {
+        suspend(null);
+    }
+
+    @When("they suspend the target user with a token approved for another user")
+    public void suspendWithForeignToken() {
+        suspend(boundToken("suspend", UUID.randomUUID(), Map.of()));
+    }
+
+    @When("they suspend the target user with a reactivation token")
+    public void suspendWithReactivationToken() {
+        suspend(boundToken("unsuspend", TARGET_USER, Map.of()));
+    }
+
+    @When("they attempt to suspend the target user")
+    public void attemptSuspend() {
+        suspend(null);
+    }
+
+    private void suspend(String stepUpToken) {
+        lastResponse = sendWithStepUp(HttpMethod.POST, "/v1/admin/users/" + TARGET_USER + "/suspend",
+                Map.of("note", HOLD_NOTE), stepUpToken);
+    }
+
+    @Then("entitlements was asked to suspend the target user")
+    public void entitlementsSuspendCalled() {
+        AdminWireMock.server().verify(1, postRequestedFor(urlMatching("/internal/admin/suspend"))
+                .withRequestBody(matchingJsonPath("$.targetUserId", equalTo(TARGET_USER.toString())))
+                .withRequestBody(matchingJsonPath("$.staffUserId", equalTo(staffUserId.toString()))));
+    }
+
+    @Then("entitlements was not asked to suspend anyone")
+    public void entitlementsSuspendNotCalled() {
+        AdminWireMock.server().verify(0, postRequestedFor(urlMatching("/internal/admin/suspend")));
+    }
+
     @When("they reactivate the target user with a valid step-up token")
     public void reactivateWithToken() {
         reactivate(boundToken("unsuspend", TARGET_USER, Map.of()));

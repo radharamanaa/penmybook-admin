@@ -197,3 +197,45 @@ Feature: Staff can lift a chargeback or review hold
     When they attempt to unfreeze the target user's wallet
     Then the response status is 403
     And the audit log has a DENY row for action "WALLET_UNFREEZE"
+
+  Scenario: A platform admin suspends an account
+    Given a platform admin is signed in
+    When they suspend the target user with a valid step-up token
+    Then the response status is 200
+    And the reactivated account status is "SUSPENDED"
+    And entitlements was asked to suspend the target user
+    And the audit log has an ALLOW row for action "ACCOUNT_SUSPEND"
+
+  Scenario: Suspending an account that is banned changes nothing and says why
+    Given a platform admin is signed in
+    And entitlements reports the target user is "BANNED" and cannot be suspended
+    When they suspend the target user with a valid step-up token
+    Then the response status is 409
+    And the response code is "NOT_SUSPENDABLE"
+
+  Scenario: Suspending without a step-up token is rejected
+    Given a platform admin is signed in
+    When they suspend the target user without a step-up token
+    Then the response status is 403
+    And the response code is "step_up_required"
+    And entitlements was not asked to suspend anyone
+
+  Scenario: A suspend token approved for another user is rejected
+    Given a platform admin is signed in
+    When they suspend the target user with a token approved for another user
+    Then the response status is 403
+    And the response code is "step_up_invalid"
+    And entitlements was not asked to suspend anyone
+
+  Scenario: A reactivation token cannot suspend an account
+    Given a platform admin is signed in
+    When they suspend the target user with a reactivation token
+    Then the response status is 403
+    And the response code is "step_up_invalid"
+    And entitlements was not asked to suspend anyone
+
+  Scenario: A non-admin cannot suspend an account
+    Given a non-admin user is signed in
+    When they attempt to suspend the target user
+    Then the response status is 403
+    And the audit log has a DENY row for action "ACCOUNT_SUSPEND"

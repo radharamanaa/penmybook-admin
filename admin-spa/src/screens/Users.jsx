@@ -204,6 +204,48 @@ function formatDollars(cents) {
  * take back) and the two OTP lifts (F3). Reactivation is offered only for a suspension:
  * entitlements refuses any other status anyway.
  */
+// What entitlements will suspend. A banned, waitlisted or deleted account stays as it is: a later
+// reactivation would turn it ACTIVE.
+const SUSPENDABLE_STATUSES = new Set(['ACTIVE', 'SUSPENDED_FOR_REVIEW'])
+
+function statusWords(accountStatus) {
+  return String(accountStatus).toLowerCase().replaceAll('_', ' ')
+}
+
+function suspendFailureCopy(email, err) {
+  const code = err.body?.code
+  if (code === 'NOT_SUSPENDABLE') {
+    return `${email} was not suspended: the account is ${statusWords(err.body.accountStatus)}. It stays as it is.`
+  }
+  if (code === 'step_up_invalid' || code === 'step_up_required') {
+    return 'That code was not accepted, so nothing changed. Start the suspension again.'
+  }
+  if (code === 'DOWNSTREAM_REJECTED') {
+    return `${email} may not be suspended: the account service did not confirm. Check the status below before trying again.`
+  }
+  return err.message
+}
+
+function SuspendPanel({ state, note, onNoteChange, onSuspend }) {
+  if (!state || state.accountStatus === 'SUSPENDED' || state.accountStatus === 'PURGED') return null
+  if (!SUSPENDABLE_STATUSES.has(state.accountStatus)) {
+    return <p className="sub">This account is {statusWords(state.accountStatus)}, so it cannot be suspended.</p>
+  }
+  return (
+    <div className="row">
+      <div>
+        <label htmlFor="suspend-note">Why are you suspending this account?</label>
+        <input id="suspend-note" value={note} onChange={(e) => onNoteChange(e.target.value)}
+               placeholder="e.g. abuse report #123" />
+        <HoldNoteHint note={note} />
+      </div>
+      <button disabled={note.trim().length < HOLD_NOTE_MIN_LENGTH} onClick={onSuspend}>
+        Start OTP suspend account
+      </button>
+    </div>
+  )
+}
+
 function HoldPanel({ state, note, onNoteChange, onReactivate, onUnfreeze, resetStrikes,
                      onResetStrikesChange, confirmWalletUnknown, onConfirmWalletUnknown,
                      onCancelWalletUnknown }) {
@@ -295,6 +337,7 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
   const [holdState, setHoldState] = useState(null)
   const [holdError, setHoldError] = useState(null)
   const [holdNote, setHoldNote] = useState('')
+  const [suspendNote, setSuspendNote] = useState('')
   const [resetStrikes, setResetStrikes] = useState(false)
   // Billing could not say whether the wallet is frozen: staff confirm before a reactivation.
   const [confirmWalletUnknown, setConfirmWalletUnknown] = useState(false)
@@ -438,6 +481,11 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
         }
         setResetStrikes(false)
         await loadHoldState()
+      } else if (otp.action === 'suspend') {
+        await api.suspend(user.userId, otp.note, v.stepUpToken)
+        onDone(`${user.email} is suspended.`)
+        setSuspendNote('')
+        await loadHoldState()
       } else if (otp.action === 'set_platform_admin') {
         const r = await api.setPlatformAdmin(user.userId, otp.params.isPlatformAdmin, v.stepUpToken)
         onDone(`is_platform_admin → ${r.isPlatformAdmin} for ${user.email}`)
@@ -456,6 +504,12 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
         // The token is spent: "Reactivate anyway" starts a fresh OTP that carries the flag.
         setOtp(null)
         setConfirmWalletUnknown(true)
+        await loadHoldState()
+        return
+      }
+      if (otp.action === 'suspend') {
+        onError(suspendFailureCopy(user.email, err))
+        setOtp(null) // the code is spent: a new attempt needs a new one
         await loadHoldState()
         return
       }
@@ -500,6 +554,8 @@ function UserActions({ user, initialPaymentId = '', initialRefundCents = '', ini
                  onReactivate={reactivate}
                  onUnfreeze={() => startOtp('wallet_unfreeze',
                    { ownerType: 'USER', ownerId: user.userId }, holdNote.trim())} />
+      <SuspendPanel state={holdState} note={suspendNote} onNoteChange={setSuspendNote}
+                    onSuspend={() => startOtp('suspend', {}, suspendNote.trim())} />
 
       <div className="row">
         <div>

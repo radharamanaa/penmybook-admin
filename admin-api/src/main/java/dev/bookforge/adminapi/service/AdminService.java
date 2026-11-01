@@ -163,8 +163,28 @@ public class AdminService {
         return runWrite(GRANT_CREDIT, command, downstream::grantCredit);
     }
 
-    public AdminActionResult suspend(AdminCommand command) {
-        return runWrite(SUSPEND, command, downstream::suspend);
+    /**
+     * Suspend an account. Entitlements suspends a live account or one under review; for any other
+     * status (banned, waitlisted, soft-deleted, already suspended) it answers success=false with the
+     * current status, which comes back here as {@link SuspendOutcome#notSuspendable}.
+     */
+    public SuspendOutcome suspend(AdminCommand command) {
+        StepUpVerifier.Result gate = gate(SUSPEND, command);
+        if (gate instanceof StepUpVerifier.Result.Missing) {
+            return SuspendOutcome.rejected(REJECT_STEP_UP_REQUIRED);
+        }
+        if (!(gate instanceof StepUpVerifier.Result.Valid)) {
+            return SuspendOutcome.rejected(REJECT_STEP_UP_INVALID);
+        }
+        DownstreamResult result = callDownstream(
+                () -> downstream.suspend(command),
+                () -> new DownstreamResult(false, null, null));
+        if (result.success()) {
+            return SuspendOutcome.suspended(result.auditEntryId(), result.accountStatus());
+        }
+        return result.accountStatus() == null
+                ? SuspendOutcome.downstreamRejected()
+                : SuspendOutcome.notSuspendable(result.accountStatus());
     }
 
     /**
@@ -270,6 +290,26 @@ public class AdminService {
      * without success means the account was not suspended (nothing changed); both null means the
      * downstream failed.
      */
+    public record SuspendOutcome(boolean success, UUID auditEntryId, String accountStatus,
+                                 String rejectionReason) {
+
+        static SuspendOutcome suspended(UUID auditEntryId, String accountStatus) {
+            return new SuspendOutcome(true, auditEntryId, accountStatus, null);
+        }
+
+        static SuspendOutcome notSuspendable(String accountStatus) {
+            return new SuspendOutcome(false, null, accountStatus, null);
+        }
+
+        static SuspendOutcome rejected(String reason) {
+            return new SuspendOutcome(false, null, null, reason);
+        }
+
+        static SuspendOutcome downstreamRejected() {
+            return new SuspendOutcome(false, null, null, null);
+        }
+    }
+
     public record UnsuspendOutcome(boolean success, UUID auditEntryId, String accountStatus,
                                    String rejectionReason, String refusalCode, String refusalMessage,
                                    Boolean contentStrikesReset, String contentStrikesResetError) {
