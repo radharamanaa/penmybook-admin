@@ -86,6 +86,7 @@ export function AdminShell({ adminEmail, onLogout, sections }) {
         {link('/pricing', 'Pricing & billing')}
         {link('/system', 'System (read-only)')}
         <div className="group">People</div>
+        {link('/signups', 'Signups')}
         {link('/users', 'Users & money')}
         {link('/waitlist', 'Waitlist')}
         <div className="group">Govern</div>

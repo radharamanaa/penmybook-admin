@@ -9,6 +9,17 @@ Feature: Closed-beta waitlist admin surface (admin control plane D11)
     Then the response status is 200
     And the search result includes account status "WAITLISTED"
 
+  Scenario: the signups list passes every filter on, caps the page size and carries the total
+    Given a platform admin is signed in
+    When they list signups filtered to waitlisted users
+    Then the response status is 200
+    And the signups list shows "target@example.com" of 128 users
+
+  Scenario: a non-admin cannot see the signups list
+    Given a non-admin user is signed in
+    When they list signups filtered to waitlisted users
+    Then the response status is 403
+
   Scenario: a non-admin cannot approve from the waitlist
     Given a non-admin user is signed in
     When they attempt to approve the target user from the waitlist

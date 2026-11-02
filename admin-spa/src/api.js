@@ -105,6 +105,14 @@ export const api = {
   // ── users & money (admin-api) ──
   searchUsers: (email, limit = 50) =>
     request(`/api/v1/admin/users/search?email=${encodeURIComponent(email)}&limit=${limit}`),
+  listUsers: ({ email, status, signedUpFrom, signedUpBefore, page, size }) => {
+    const query = new URLSearchParams({ page, size })
+    if (email) query.set('email', email)
+    if (status) query.set('status', status)
+    if (signedUpFrom) query.set('signedUpFrom', signedUpFrom)
+    if (signedUpBefore) query.set('signedUpBefore', signedUpBefore)
+    return request(`/api/v1/admin/users?${query}`)
+  },
   walletTopUp: (userId, amountCents, reason, stepUpToken) =>
     request(`/api/v1/admin/users/${userId}/wallet/top-up`, {
       method: 'POST',

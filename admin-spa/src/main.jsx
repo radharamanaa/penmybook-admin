@@ -8,6 +8,7 @@ import Operations from './screens/Operations.jsx'
 import ConfigSection from './screens/ConfigSection.jsx'
 import Pricing from './screens/Pricing.jsx'
 import Users from './screens/Users.jsx'
+import Signups from './screens/Signups.jsx'
 import Waitlist from './screens/Waitlist.jsx'
 import Analytics from './screens/Analytics.jsx'
 import Feedback from './screens/Feedback.jsx'
@@ -30,6 +31,7 @@ const router = createBrowserRouter([
       { path: '/config/:section', element: <ConfigSection /> },
       { path: '/pricing', element: <Pricing /> },
       { path: '/trusted-sites', element: <TrustedSites /> },
+      { path: '/signups', element: <Signups /> },
       { path: '/users', element: <Users /> },
       { path: '/waitlist', element: <Waitlist /> },
       { path: '/analytics', element: <Analytics /> },

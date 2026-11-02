@@ -83,6 +83,7 @@ public class AdminWireMock {
         stubBillingMoneyAlerts();
         stubEntitlementsSetPlatformAdmin();
         stubEntitlementsUserSearch();
+        stubEntitlementsUserList();
         stubEntitlementsUsersByIds();
         stubEntitlementsWaitlist();
         stubEntitlementsPreAdmit();
@@ -256,6 +257,23 @@ public class AdminWireMock {
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")
                         .withBody("{\"isPlatformAdmin\":true}")));
+    }
+
+    /** entitlements {@code GET /internal/admin/users} — the signups list, filtered on status. */
+    private static void stubEntitlementsUserList() {
+        server.stubFor(get(urlPathEqualTo("/internal/admin/users"))
+                .withQueryParam("status", com.github.tomakehurst.wiremock.client.WireMock.equalTo("WAITLISTED"))
+                .withQueryParam("email", com.github.tomakehurst.wiremock.client.WireMock.equalTo("target"))
+                .withQueryParam("signedUpFrom", com.github.tomakehurst.wiremock.client.WireMock.equalTo("2026-05-01T00:00:00Z"))
+                .withQueryParam("signedUpBefore", com.github.tomakehurst.wiremock.client.WireMock.equalTo("2026-05-02T00:00:00Z"))
+                .withQueryParam("size", com.github.tomakehurst.wiremock.client.WireMock.equalTo("100"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"users\":[{\"userId\":\"" + UUID.randomUUID() + "\","
+                                + "\"email\":\"target@example.com\",\"accountStatus\":\"WAITLISTED\","
+                                + "\"isDeveloper\":false,\"createdAt\":\"2026-05-01T09:30:00Z\"}],"
+                                + "\"total\":128}")));
     }
 
     /** entitlements {@code GET /internal/admin/users/search?email=&limit=} — fuzzy search. */

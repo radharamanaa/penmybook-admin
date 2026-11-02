@@ -1189,6 +1189,12 @@ public class PortalAdminSteps {
         lastResponse = sendGet("/v1/admin/users/search?email=" + email);
     }
 
+    @When("they list signups filtered to waitlisted users")
+    public void listSignups() {
+        lastResponse = sendGet("/v1/admin/users?email=target&status=WAITLISTED"
+                + "&signedUpFrom=2026-05-01T00:00:00Z&signedUpBefore=2026-05-02T00:00:00Z&size=500");
+    }
+
     @When("they attempt to approve the target user from the waitlist")
     public void attemptApprove() {
         admitFromWaitlist();
@@ -1334,6 +1340,14 @@ public class PortalAdminSteps {
     @And("the payments health reports webhooks 24h {int}")
     public void paymentsHealthWebhooks24h(int n) {
         assertThat(parseBody().path("completedWebhooks24h").asLong()).isEqualTo(n);
+    }
+
+    @And("the signups list shows {string} of {int} users")
+    public void signupsListShows(String email, int total) {
+        JsonNode body = parseBody();
+        assertThat(body.path("users").get(0).path("email").asText()).isEqualTo(email);
+        assertThat(body.path("users").get(0).path("createdAt").asText()).startsWith("2026-05-01T09:30");
+        assertThat(body.path("total").asInt()).isEqualTo(total);
     }
 
     @And("the search result includes account status {string}")

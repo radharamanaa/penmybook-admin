@@ -41,6 +41,7 @@ import dev.bookforge.adminapi.dto.RefundReceiptView;
 import dev.bookforge.adminapi.dto.RefundRequest;
 import dev.bookforge.adminapi.dto.SetPlatformAdminRequest;
 import dev.bookforge.adminapi.dto.SpendByBooksResponse;
+import dev.bookforge.adminapi.dto.UserListResult;
 import dev.bookforge.adminapi.dto.UserSearchResultEntry;
 import dev.bookforge.adminapi.dto.WalletBalanceView;
 import dev.bookforge.adminapi.dto.WalletTopUpRequest;
@@ -96,6 +97,8 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/v1/admin")
 public class AdminController {
+
+    private static final int MAX_USER_PAGE_SIZE = 100;
 
     private static final String IP_OCTET = "(25[0-5]|2[0-4]\\d|1?\\d?\\d)";
     private static final java.util.regex.Pattern IP_LITERAL =
@@ -1088,6 +1091,24 @@ public class AdminController {
     public List<UserSearchResultEntry> searchUsers(@RequestParam("email") String emailQuery,
                                                    @RequestParam(value = "limit", defaultValue = "25") int limit) {
         return downstream.searchUsers(emailQuery, Math.min(Math.max(limit, 1), 100));
+    }
+
+    /**
+     * The signups list, newest first; delegates to entitlements {@code GET /internal/admin/users}.
+     * Read-only — no audit row.
+     *
+     * <p>Authorisation: {@code hasRole('PLATFORM_ADMIN')}.
+     */
+    @GetMapping("/users")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public UserListResult listUsers(@RequestParam(value = "email", required = false) String email,
+                                    @RequestParam(value = "status", required = false) String status,
+                                    @RequestParam(value = "signedUpFrom", required = false) String signedUpFrom,
+                                    @RequestParam(value = "signedUpBefore", required = false) String signedUpBefore,
+                                    @RequestParam(value = "page", defaultValue = "0") int page,
+                                    @RequestParam(value = "size", defaultValue = "50") int size) {
+        return downstream.listUsers(email, status, signedUpFrom, signedUpBefore,
+                Math.max(page, 0), Math.min(Math.max(size, 1), MAX_USER_PAGE_SIZE));
     }
 
     // ───────── Spend dashboard (read-only — no audit rows, mirroring searchUsers) ─────────

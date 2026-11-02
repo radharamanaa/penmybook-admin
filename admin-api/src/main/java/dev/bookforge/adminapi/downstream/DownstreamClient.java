@@ -15,6 +15,7 @@ import dev.bookforge.adminapi.dto.PlatformAdminUpdateView;
 import dev.bookforge.adminapi.dto.SpendByBooksResponse;
 import dev.bookforge.adminapi.dto.UnrecoveredPaymentsView;
 import dev.bookforge.adminapi.dto.SpendReportView;
+import dev.bookforge.adminapi.dto.UserListResult;
 import dev.bookforge.adminapi.dto.UserSearchResultEntry;
 import dev.bookforge.adminapi.dto.PreAdmitEntryView;
 import dev.bookforge.adminapi.dto.PreAdmitView;
@@ -159,6 +160,13 @@ public interface DownstreamClient {
      * entitlements {@code GET /internal/admin/users/search?email=&limit=} — fuzzy user search.
      */
     List<UserSearchResultEntry> searchUsers(String emailQuery, int limit);
+
+    /**
+     * entitlements {@code GET /internal/admin/users} — the signups list, newest first. A null or blank
+     * filter is left out.
+     */
+    UserListResult listUsers(String email, String status, String signedUpFrom, String signedUpBefore,
+                             int page, int size);
 
     /**
      * entitlements {@code POST /internal/pricing/org-override} — upsert a per-org pricing

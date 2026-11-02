@@ -22,6 +22,7 @@ import dev.bookforge.adminapi.dto.SpendByBooksResponse;
 import dev.bookforge.adminapi.dto.SpendReportView;
 import dev.bookforge.adminapi.dto.UnrecoveredPaymentEntry;
 import dev.bookforge.adminapi.dto.UnrecoveredPaymentsView;
+import dev.bookforge.adminapi.dto.UserListResult;
 import dev.bookforge.adminapi.dto.UserSearchResultEntry;
 import dev.bookforge.adminapi.dto.PreAdmitEntryView;
 import dev.bookforge.adminapi.dto.PreAdmitView;
@@ -1006,8 +1007,31 @@ public class HttpDownstreamClient implements DownstreamClient {
         String url = downstream.entitlementsUrl() + "/internal/admin/users/search?email="
                 + encoded + "&limit=" + Math.max(1, limit);
         JsonNode json = get(url, ENTITLEMENTS_AUD, ADMIN_RPC_TIMEOUT);
+        return userRows(json.path("results").isArray() ? json.path("results") : json);
+    }
+
+    @Override
+    @CircuitBreaker(name = CB_ENTITLEMENTS_REPORTS)
+    public UserListResult listUsers(String email, String status, String signedUpFrom, String signedUpBefore,
+                                    int page, int size) {
+        StringBuilder url = new StringBuilder(downstream.entitlementsUrl())
+                .append("/internal/admin/users?page=").append(page).append("&size=").append(size);
+        appendFilter(url, "email", email);
+        appendFilter(url, "status", status);
+        appendFilter(url, "signedUpFrom", signedUpFrom);
+        appendFilter(url, "signedUpBefore", signedUpBefore);
+        JsonNode json = get(url.toString(), ENTITLEMENTS_AUD, ADMIN_RPC_TIMEOUT);
+        return new UserListResult(userRows(json.path("users")), json.path("total").asLong(0));
+    }
+
+    private static void appendFilter(StringBuilder url, String name, String value) {
+        if (value != null && !value.isBlank()) {
+            url.append('&').append(name).append('=').append(URLEncoder.encode(value, StandardCharsets.UTF_8));
+        }
+    }
+
+    private List<UserSearchResultEntry> userRows(JsonNode results) {
         List<UserSearchResultEntry> out = new ArrayList<>();
-        JsonNode results = json.path("results").isArray() ? json.path("results") : json;
         if (results.isArray()) {
             for (JsonNode row : results) {
                 UUID userId = optionalUuid(row, "userId");
