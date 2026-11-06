@@ -8,6 +8,7 @@ export const PUBLISH_FORMATS = [
   { label: 'Paperback (KDP)', booksField: 'books_printed', action: 'PUBLISH_PAPERBACK' },
   { label: 'Kindle', booksField: 'books_kindle', action: 'PUBLISH_KINDLE' },
   { label: 'EPUB', booksField: 'books_epub', action: 'PUBLISH_EPUB' },
+  { label: 'LinkedIn PDF', booksField: 'books_linkedin', action: 'PUBLISH_LINKEDIN' },
 ]
 
 export function addUsageCounts(a, b) {
@@ -47,7 +48,7 @@ export function formatJoinWarning({
   const parts = []
   if (staleCounts) {
     parts.push(
-      'curator did not return per-format book counts (books_digital, books_kindle, books_epub). Roll curator with this admin SPA',
+      'curator did not return per-format book counts (books_digital, books_kindle, books_epub, books_linkedin). Roll curator with this admin SPA',
     )
   } else if (!countsReady) {
     parts.push(

@@ -15,12 +15,20 @@ const ACTIONS = [
   { value: 'PUBLISH_PAPERBACK', action: 'PUBLISH_PAPERBACK', category: null, label: 'Publish — paperback' },
   { value: 'PUBLISH_KINDLE', action: 'PUBLISH_KINDLE', category: null, label: 'Publish — Kindle' },
   { value: 'PUBLISH_EPUB', action: 'PUBLISH_EPUB', category: null, label: 'Publish — EPUB' },
+  // Owner, 2026-11-05: settable from $0 to $10 only (entitlements refuses more).
+  { value: 'PUBLISH_LINKEDIN', action: 'PUBLISH_LINKEDIN', category: null, label: 'Publish — LinkedIn PDF ($0–$10)', maxCents: 1000 },
 ]
 
 const dollars = (cents) =>
   cents === null || cents === undefined || cents === '' || Number.isNaN(Number(cents))
     ? '—'
     : `$${(Number(cents) / 100).toFixed(2)}`
+
+/** The first edit above its row's ceiling, as a message; null when every edit fits. */
+export function ceilingError(rows, drafts) {
+  const over = rows.find((a) => a.maxCents !== undefined && Number(drafts[a.value]) > a.maxCents)
+  return over ? `${over.label}: the highest allowed price is ${dollars(over.maxCents)}.` : null
+}
 
 /**
  * Inline price editor: each action's price is edited directly in the table (cents,
@@ -60,6 +68,11 @@ export default function Pricing() {
     setError(null)
     setResult(null)
     if (!dirty.length) return
+    const tooHigh = ceilingError(dirty, drafts)
+    if (tooHigh) {
+      setError(tooHigh)
+      return
+    }
     try {
       for (const a of dirty) {
         const cents = Number(drafts[a.value])
@@ -123,7 +136,7 @@ export default function Pricing() {
                       {current == null ? '…' : dollars(v)}
                     </td>
                     <td>
-                      <input type="number" inputMode="numeric" min="0" max="100000" step="1"
+                      <input type="number" inputMode="numeric" min="0" max={a.maxCents ?? 100000} step="1"
                              className={changed ? 'dirty' : ''}
                              value={current == null ? '' : v}
                              onChange={(e) => setDrafts({ ...drafts, [a.value]: e.target.value })}

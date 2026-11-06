@@ -12,6 +12,7 @@ const FORMAT_USAGE = {
   books_printed: 1,
   books_kindle: 0,
   books_epub: 0,
+  books_linkedin: 0,
 }
 
 describe('publish format spend join (S2)', () => {
@@ -21,6 +22,7 @@ describe('publish format spend join (S2)', () => {
       books_printed: 1,
       books_kindle: 2,
       books_epub: 0,
+      books_linkedin: 0,
     }
     const byAction = [
       { action: 'PUBLISH_DIGITAL', spentCents: 300, chargeCount: 3 },
@@ -33,6 +35,7 @@ describe('publish format spend join (S2)', () => {
       { label: 'Paperback (KDP)', books: 1, spentCents: 1500, chargeCount: 1 },
       { label: 'Kindle', books: 2, spentCents: 200, chargeCount: 2 },
       { label: 'EPUB', books: 0, spentCents: 0, chargeCount: 0 },
+      { label: 'LinkedIn PDF', books: 0, spentCents: 0, chargeCount: 0 },
     ])
   })
 
@@ -45,6 +48,7 @@ describe('publish format spend join (S2)', () => {
       books_printed: 1,
       books_kindle: 1,
       books_epub: 0,
+      books_linkedin: 0,
     })
   })
 
